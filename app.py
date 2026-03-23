@@ -1,128 +1,209 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║          مهووس — نظام إدارة منتجات العطور الذكي                            ║
-║          Mahwous — AI-Powered Perfume Product Management System             ║
-║          Version 2.0 | Streamlit + Anthropic + Google CSE                  ║
+║   مهووس — مدير الملفات الذكي الشامل  v3.0                                 ║
+║   Mahwous Smart File Manager — Full Edition                                 ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 """
 
 import streamlit as st
 import pandas as pd
 import numpy as np
-import os, io, re, json, time, unicodedata
-from datetime import datetime
+import os, io, re, json, time
 import requests
-
-# ── Export libs ──────────────────────────────────────────────────────────────
+from datetime import datetime
 from openpyxl import Workbook, load_workbook
-from openpyxl.styles import (
-    Font, PatternFill, Alignment, Border, Side, GradientFill
-)
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
-
-# ── AI ────────────────────────────────────────────────────────────────────────
 import anthropic
 
-# ═══════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════
 # PAGE CONFIG
-# ═══════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════
 st.set_page_config(
-    page_title="مهووس — إدارة المنتجات",
+    page_title="مهووس | مدير الملفات",
     page_icon="🌸",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="expanded"
 )
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# CUSTOM CSS
-# ═══════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════
+# GLOBAL CSS
+# ══════════════════════════════════════════════════════════════
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;600;700;900&display=swap');
 
-html, body, [class*="css"] { font-family: 'Cairo', sans-serif; direction: rtl; }
-
-/* Header */
-.main-header {
-    background: linear-gradient(135deg, #0f0e0d 0%, #1a1510 100%);
-    color: #b8933a;
-    padding: 1.2rem 2rem;
-    border-radius: 14px;
-    margin-bottom: 1.5rem;
-    display: flex;
-    align-items: center;
-    gap: 1rem;
-    border: 1px solid rgba(184,147,58,0.3);
-}
-.main-header h1 { color: #b8933a; font-size: 1.8rem; margin: 0; }
-.main-header p  { color: rgba(255,255,255,0.5); font-size: 0.85rem; margin: 0; }
-
-/* Mode card */
-.mode-card {
-    background: rgba(184,147,58,0.07);
-    border: 1px solid rgba(184,147,58,0.25);
-    border-radius: 12px;
-    padding: 1rem 1.2rem;
-    margin-bottom: 0.75rem;
-    cursor: pointer;
-    transition: all 0.2s;
-}
-.mode-card:hover { border-color: #b8933a; background: rgba(184,147,58,0.12); }
-
-/* Status badges */
-.badge-ok  { background: #e8f5e9; color: #2d7a4f; padding: 3px 10px; border-radius: 20px; font-size: 0.78rem; font-weight: 700; }
-.badge-err { background: #fdecea; color: #c62828; padding: 3px 10px; border-radius: 20px; font-size: 0.78rem; font-weight: 700; }
-.badge-pend{ background: #fff8e1; color: #f57f17; padding: 3px 10px; border-radius: 20px; font-size: 0.78rem; font-weight: 700; }
-
-/* Progress rows */
-.proc-row {
-    display: flex; align-items: center; gap: 10px;
-    padding: 8px 12px; border-radius: 8px;
-    background: rgba(0,0,0,0.02);
-    margin-bottom: 4px; font-size: 0.875rem;
+*, *::before, *::after { box-sizing: border-box; }
+html, body, [class*="css"], .stApp {
+    font-family: 'Cairo', sans-serif !important;
+    direction: rtl;
 }
 
-/* Metric card */
-.metric-card {
-    background: #fff;
-    border: 1px solid #e8e2d9;
-    border-radius: 12px;
-    padding: 1rem 1.25rem;
-    text-align: center;
+/* ── Sidebar ── */
+section[data-testid="stSidebar"] {
+    background: linear-gradient(180deg, #0f0e0d 0%, #1c1710 100%);
+    border-left: 2px solid rgba(184,147,58,0.3);
 }
-.metric-card .num  { font-size: 2rem; font-weight: 700; color: #b8933a; }
-.metric-card .lbl  { font-size: 0.8rem; color: #7a6e68; }
+section[data-testid="stSidebar"] * { color: #e8d5b7 !important; }
+section[data-testid="stSidebar"] .stButton button {
+    background: rgba(184,147,58,0.12) !important;
+    border: 1px solid rgba(184,147,58,0.35) !important;
+    color: #b8933a !important;
+    border-radius: 8px !important;
+}
+section[data-testid="stSidebar"] .stButton button:hover {
+    background: rgba(184,147,58,0.25) !important;
+}
 
-/* Divider */
-.gold-divider {
-    height: 2px;
-    background: linear-gradient(90deg, transparent, #b8933a, transparent);
-    margin: 1.5rem 0;
-    border: none;
+/* ── Top Bar ── */
+.top-bar {
+    background: linear-gradient(135deg,#0f0e0d 0%,#1c1710 60%,#2a1f0e 100%);
+    padding: 14px 24px; border-radius: 14px; margin-bottom: 18px;
+    display: flex; align-items: center; gap: 16px;
+    border: 1px solid rgba(184,147,58,0.35);
+    box-shadow: 0 8px 32px rgba(0,0,0,0.25);
+}
+.top-bar .logo-circle {
+    width:48px; height:48px; border-radius:50%;
+    background: linear-gradient(135deg,#b8933a,#d4a843);
+    display:flex; align-items:center; justify-content:center;
+    font-size:22px; font-weight:900; color:#0f0e0d;
+    box-shadow: 0 0 24px rgba(184,147,58,0.5);
+    flex-shrink:0;
+}
+.top-bar h1 { color:#b8933a; font-size:1.6rem; margin:0; line-height:1.2; }
+.top-bar p  { color:rgba(255,255,255,0.4); font-size:0.78rem; margin:0; }
+
+/* ── Nav Pills ── */
+.nav-container {
+    display:flex; gap:8px; flex-wrap:wrap; margin-bottom:20px;
+}
+.nav-pill {
+    padding:9px 20px; border-radius:30px; cursor:pointer;
+    font-size:0.85rem; font-weight:700; border:none;
+    transition:all 0.2s; white-space:nowrap;
+}
+.nav-pill.active {
+    background:linear-gradient(135deg,#b8933a,#d4a843);
+    color:#0f0e0d; box-shadow:0 4px 16px rgba(184,147,58,0.4);
+}
+.nav-pill.inactive {
+    background:rgba(184,147,58,0.08);
+    color:#7a6e68; border:1px solid rgba(184,147,58,0.2);
+}
+.nav-pill.inactive:hover {
+    background:rgba(184,147,58,0.15); color:#0f0e0d;
+}
+
+/* ── Upload Zone ── */
+.upload-zone {
+    border:2px dashed rgba(184,147,58,0.4); border-radius:16px;
+    padding:2.5rem; text-align:center;
+    background:rgba(184,147,58,0.04);
+    transition:all 0.2s;
+}
+.upload-zone:hover { border-color:#b8933a; background:rgba(184,147,58,0.08); }
+.upload-icon { font-size:3rem; margin-bottom:0.5rem; }
+.upload-title { font-size:1.1rem; font-weight:700; color:#0f0e0d; margin-bottom:0.25rem; }
+.upload-sub   { font-size:0.82rem; color:#9a8e86; }
+
+/* ── Section Header ── */
+.sec-header {
+    display:flex; align-items:center; gap:10px;
+    margin:20px 0 12px;
+}
+.sec-header .bar {
+    width:4px; height:22px; border-radius:2px;
+    background:linear-gradient(180deg,#b8933a,#d4a843);
+}
+.sec-header h3 { margin:0; font-size:1rem; font-weight:700; color:#0f0e0d; }
+
+/* ── Stat Card ── */
+.stat-row { display:flex; gap:12px; flex-wrap:wrap; margin:12px 0; }
+.stat-card {
+    flex:1; min-width:120px;
+    background:#fff; border:1px solid rgba(184,147,58,0.2);
+    border-radius:12px; padding:14px 18px; text-align:center;
+    box-shadow:0 2px 12px rgba(0,0,0,0.05);
+}
+.stat-card .n  { font-size:2rem; font-weight:900; color:#b8933a; line-height:1; }
+.stat-card .lbl{ font-size:0.75rem; color:#7a6e68; margin-top:4px; }
+
+/* ── Tool Button ── */
+.tool-btn {
+    display:inline-flex; align-items:center; gap:6px;
+    padding:8px 16px; border-radius:8px; cursor:pointer;
+    font-size:0.82rem; font-weight:700; border:none;
+    transition:all 0.18s; white-space:nowrap;
+}
+.tool-btn.primary {
+    background:linear-gradient(135deg,#0f0e0d,#2a1f0e);
+    color:#b8933a; box-shadow:0 4px 14px rgba(15,14,13,0.2);
+}
+.tool-btn.gold {
+    background:linear-gradient(135deg,#b8933a,#d4a843);
+    color:#0f0e0d;
+}
+.tool-btn.outline {
+    background:transparent; color:#b8933a;
+    border:1.5px solid rgba(184,147,58,0.4);
+}
+
+/* ── Progress ── */
+.proc-item {
+    display:flex; align-items:center; gap:10px;
+    padding:7px 12px; border-radius:8px; margin-bottom:4px;
+    font-size:0.82rem;
+}
+.proc-item.ok  { background:#f0faf4; color:#2d7a4f; }
+.proc-item.err { background:#fef2f2; color:#c62828; }
+.proc-item.run { background:#fff8e1; color:#e65100; }
+
+/* ── Tags ── */
+.tag-ai    { background:#e8f5e9; color:#2d7a4f; padding:3px 10px; border-radius:20px; font-size:0.74rem; font-weight:700; }
+.tag-img   { background:#e3f2fd; color:#1565c0; padding:3px 10px; border-radius:20px; font-size:0.74rem; font-weight:700; }
+.tag-brand { background:#fce4ec; color:#880e4f; padding:3px 10px; border-radius:20px; font-size:0.74rem; font-weight:700; }
+.tag-miss  { background:#fafafa; color:#9e9e9e; padding:3px 10px; border-radius:20px; font-size:0.74rem; }
+
+/* ── Gold Divider ── */
+.gdiv {
+    height:1px; margin:20px 0;
+    background:linear-gradient(90deg,transparent,rgba(184,147,58,0.4),transparent);
+    border:none;
+}
+
+/* ── Alerts ── */
+.alert-info    { background:#e3f2fd; border-right:4px solid #1976d2; border-radius:8px; padding:10px 14px; font-size:0.85rem; color:#0d47a1; }
+.alert-success { background:#e8f5e9; border-right:4px solid #388e3c; border-radius:8px; padding:10px 14px; font-size:0.85rem; color:#1b5e20; }
+.alert-warn    { background:#fff8e1; border-right:4px solid #f57f17; border-radius:8px; padding:10px 14px; font-size:0.85rem; color:#e65100; }
+
+/* ── Data Editor override ── */
+.stDataFrame, [data-testid="stDataFrame"] { direction: rtl; }
+
+/* Streamlit button overrides */
+.stButton > button {
+    font-family:'Cairo',sans-serif !important;
+    font-weight:600 !important;
 }
 </style>
 """, unsafe_allow_html=True)
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# CONSTANTS — SALLA EXACT COLUMN SCHEMAS
-# ═══════════════════════════════════════════════════════════════════════════════
-
-# Full Salla product update template columns (exact order)
+# ══════════════════════════════════════════════════════════════
+# SALLA EXACT SCHEMAS
+# ══════════════════════════════════════════════════════════════
 SALLA_PRODUCT_COLS = [
     "No.", "النوع ", "أسم المنتج", "تصنيف المنتج", "صورة المنتج",
     "وصف صورة المنتج", "نوع المنتج", "سعر المنتج", "الوصف",
     "هل يتطلب شحن؟", "رمز المنتج sku", "سعر التكلفة", "السعر المخفض",
     "تاريخ بداية التخفيض", "تاريخ نهاية التخفيض", "اقصي كمية لكل عميل",
     "إخفاء خيار تحديد الكمية", "اضافة صورة عند الطلب", "الوزن", "وحدة الوزن",
-    "حالة المنتج", "الماركة", "العنوان الترويجي", "تثبيت المنتج", "الباركود",
-    "السعرات الحرارية", "MPN", "GTIN", "خاضع للضريبة ؟",
-    "سبب عدم الخضوع للضريبة",
+    "حالة المنتج", "الماركة", "العنوان الترويجي", "تثبيت المنتج",
+    "الباركود", "السعرات الحرارية", "MPN", "GTIN",
+    "خاضع للضريبة ؟", "سبب عدم الخضوع للضريبة",
     "[1] الاسم", "[1] النوع", "[1] القيمة", "[1] الصورة / اللون",
     "[2] الاسم", "[2] النوع", "[2] القيمة", "[2] الصورة / اللون",
     "[3] الاسم", "[3] النوع", "[3] القيمة", "[3] الصورة / اللون",
 ]
-
-# Salla SEO template columns
 SALLA_SEO_COLS = [
     "No. (غير قابل للتعديل)",
     "اسم المنتج (غير قابل للتعديل)",
@@ -130,8 +211,6 @@ SALLA_SEO_COLS = [
     "عنوان صفحة المنتج (SEO Page Title)",
     "وصف صفحة المنتج (SEO Page Description)",
 ]
-
-# Price update template
 SALLA_PRICE_COLS = [
     "No.", "النوع ", "أسم المنتج", "رمز المنتج sku",
     "سعر المنتج", "سعر التكلفة", "السعر المخفض",
@@ -140,61 +219,68 @@ SALLA_PRICE_COLS = [
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# SESSION STATE INIT
-# ═══════════════════════════════════════════════════════════════════════════════
-def init_state():
-    defaults = {
+# ── Key columns shown by default in the editor ──
+EDITOR_DEFAULT_COLS = [
+    "No.", "النوع ", "أسم المنتج", "الماركة", "تصنيف المنتج",
+    "سعر المنتج", "رمز المنتج sku", "صورة المنتج",
+    "وصف صورة المنتج", "حالة المنتج", "السعر المخفض",
+]
+
+# ══════════════════════════════════════════════════════════════
+# SESSION STATE
+# ══════════════════════════════════════════════════════════════
+def _init():
+    defs = {
+        "page":           "manager",   # manager | new | seo | price | settings
         "brands_df":      None,
         "categories_df":  None,
-        "working_df":     None,        # The main editable DataFrame
-        "results_df":     None,        # After AI processing
-        "source_file_name": "",
-        "col_map":        {},
-        "mode":           "new",       # new | edit | seo_merge | price
-        "processing_log": [],
-        "api_key":        os.environ.get("ANTHROPIC_API_KEY", ""),
-        "google_api_key": os.environ.get("GOOGLE_API_KEY", ""),
-        "google_cse_id":  os.environ.get("GOOGLE_CSE_ID", ""),
-        "step":           1,
+        "api_key":        os.environ.get("ANTHROPIC_API_KEY",""),
+        "google_api":     os.environ.get("GOOGLE_API_KEY",""),
+        "google_cse":     os.environ.get("GOOGLE_CSE_ID",""),
+        # File Manager state
+        "fm_df":          None,        # active working DataFrame (all columns)
+        "fm_seo_df":      None,        # SEO companion DataFrame
+        "fm_filename":    "",
+        "fm_col_map":     {},          # source col → salla col mapping
+        "fm_log":         [],
+        # New Product wizard
+        "nw_rows":        [],          # pending new product rows
     }
-    for k, v in defaults.items():
+    for k,v in defs.items():
         if k not in st.session_state:
             st.session_state[k] = v
+
     # Auto-load bundled reference data
     if st.session_state.brands_df is None:
-        try:
-            st.session_state.brands_df = pd.read_csv(
-                os.path.join(DATA_DIR, "brands.csv"), encoding="utf-8-sig"
-            )
-        except: pass
+        p = os.path.join(DATA_DIR,"brands.csv")
+        if os.path.exists(p):
+            try: st.session_state.brands_df = pd.read_csv(p,encoding="utf-8-sig")
+            except: pass
     if st.session_state.categories_df is None:
-        try:
-            st.session_state.categories_df = pd.read_csv(
-                os.path.join(DATA_DIR, "categories.csv"), encoding="utf-8-sig"
-            )
-        except: pass
+        p = os.path.join(DATA_DIR,"categories.csv")
+        if os.path.exists(p):
+            try: st.session_state.categories_df = pd.read_csv(p,encoding="utf-8-sig")
+            except: pass
 
-init_state()
+_init()
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# HELPER: READ ANY FILE → DataFrame
-# ═══════════════════════════════════════════════════════════════════════════════
-def read_any_file(uploaded_file, header_row: int = 0) -> pd.DataFrame:
-    """Read CSV or XLSX into DataFrame."""
-    name = uploaded_file.name.lower()
+# ══════════════════════════════════════════════════════════════
+# UTILITIES
+# ══════════════════════════════════════════════════════════════
+def read_file(f, salla_format=False) -> pd.DataFrame:
+    """Read CSV or Excel → clean DataFrame."""
+    name = f.name.lower()
+    hdr  = 1 if salla_format else 0
     try:
-        if name.endswith((".xlsx", ".xlsm", ".xls")):
-            df = pd.read_excel(uploaded_file, header=header_row, dtype=str)
+        if name.endswith((".xlsx",".xlsm",".xls")):
+            df = pd.read_excel(f, header=hdr, dtype=str)
         else:
-            for enc in ("utf-8-sig", "utf-8", "cp1256", "latin-1"):
+            for enc in ("utf-8-sig","utf-8","cp1256","latin-1"):
                 try:
-                    uploaded_file.seek(0)
-                    df = pd.read_csv(uploaded_file, header=header_row,
-                                     encoding=enc, dtype=str)
+                    f.seek(0)
+                    df = pd.read_csv(f,header=hdr,encoding=enc,dtype=str)
                     break
-                except UnicodeDecodeError:
-                    continue
+                except UnicodeDecodeError: continue
         df = df.dropna(how="all").reset_index(drop=True)
         df.columns = [str(c).strip() for c in df.columns]
         return df
@@ -202,967 +288,1186 @@ def read_any_file(uploaded_file, header_row: int = 0) -> pd.DataFrame:
         st.error(f"خطأ في قراءة الملف: {e}")
         return pd.DataFrame()
 
-def read_salla_product_file(uploaded_file) -> pd.DataFrame:
-    """Read Salla 2-header-row product file correctly."""
-    name = uploaded_file.name.lower()
-    try:
-        if name.endswith((".xlsx", ".xlsm")):
-            df = pd.read_excel(uploaded_file, header=1, dtype=str)
-        else:
-            uploaded_file.seek(0)
-            df = pd.read_csv(uploaded_file, header=1, encoding="utf-8-sig", dtype=str)
-        df = df.dropna(how="all").reset_index(drop=True)
-        df.columns = [str(c).strip() for c in df.columns]
-        return df
-    except Exception as e:
-        st.error(f"خطأ في قراءة ملف سلة: {e}")
-        return pd.DataFrame()
+def ensure_salla_cols(df: pd.DataFrame) -> pd.DataFrame:
+    """Ensure DataFrame has all Salla product columns."""
+    for col in SALLA_PRODUCT_COLS:
+        if col not in df.columns:
+            df[col] = ""
+    return df[SALLA_PRODUCT_COLS]
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# HELPER: BRAND & CATEGORY MATCHING
-# ═══════════════════════════════════════════════════════════════════════════════
-def match_brand(perfume_name: str) -> dict:
-    brands_df = st.session_state.brands_df
-    if brands_df is None or perfume_name.strip() == "":
-        return {}
-    name_lower = str(perfume_name).lower()
-    col_name = "اسم الماركة"
-    if col_name not in brands_df.columns:
-        col_name = brands_df.columns[0]
-    for _, row in brands_df.iterrows():
-        brand_raw = str(row.get(col_name, ""))
-        parts = re.split(r"\s*\|\s*", brand_raw)
-        for p in parts:
-            p_clean = p.strip().lower()
-            if p_clean and p_clean in name_lower:
-                return {
-                    "name":     brand_raw,
-                    "page_url": str(row.get("(SEO Page URL) رابط صفحة العلامة التجارية", "") or ""),
-                }
-    return {"name": "", "page_url": ""}
+def match_brand(name: str) -> dict:
+    bdf = st.session_state.brands_df
+    if bdf is None or not name.strip(): return {"name":"","page_url":""}
+    nl = name.lower()
+    for _,row in bdf.iterrows():
+        raw = str(row.iloc[0])
+        for p in re.split(r"\s*\|\s*",raw):
+            if p.strip().lower() and p.strip().lower() in nl:
+                return {"name":raw,"page_url":str(row.get("(SEO Page URL) رابط صفحة العلامة التجارية","") or "")}
+    return {"name":"","page_url":""}
 
-def match_category(perfume_name: str, gender: str = "") -> str:
-    n = (str(perfume_name) + " " + str(gender)).lower()
-    if any(w in n for w in ["رجال", "للرجال", "men", "homme"]):
-        return "العطور > عطور رجالية"
-    elif any(w in n for w in ["نساء", "للنساء", "women", "femme"]):
-        return "العطور > عطور نسائية"
+def match_category(name:str, gender:str="") -> str:
+    t = (name+" "+gender).lower()
+    if any(w in t for w in ["رجال","للرجال","men","homme"]): return "العطور > عطور رجالية"
+    if any(w in t for w in ["نساء","للنساء","women","femme"]): return "العطور > عطور نسائية"
     return "العطور > عطور للجنسين"
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# HELPER: TRANSLITERATE ARABIC → URL SLUG
-# ═══════════════════════════════════════════════════════════════════════════════
-def to_slug(text: str) -> str:
-    ar = {'ا':'a','أ':'a','إ':'e','آ':'a','ب':'b','ت':'t','ث':'th','ج':'j',
-          'ح':'h','خ':'kh','د':'d','ذ':'z','ر':'r','ز':'z','س':'s','ش':'sh',
-          'ص':'s','ض':'d','ط':'t','ظ':'z','ع':'a','غ':'gh','ف':'f','ق':'q',
-          'ك':'k','ل':'l','م':'m','ن':'n','ه':'h','و':'w','ي':'y','ى':'a',
-          'ة':'a','ء':'','ئ':'y','ؤ':'w'}
-    out = ""
-    for ch in str(text).lower():
-        if ch in ar:       out += ar[ch]
-        elif ch.isascii() and ch.isalnum(): out += ch
-        elif ch in " -_": out += "-"
-    return re.sub(r"-+", "-", out).strip("-") or "perfume"
+def to_slug(text:str)->str:
+    ar={"ا":"a","أ":"a","إ":"e","آ":"a","ب":"b","ت":"t","ث":"th","ج":"j","ح":"h","خ":"kh","د":"d","ذ":"z","ر":"r","ز":"z","س":"s","ش":"sh","ص":"s","ض":"d","ط":"t","ظ":"z","ع":"a","غ":"gh","ف":"f","ق":"q","ك":"k","ل":"l","م":"m","ن":"n","ه":"h","و":"w","ي":"y","ى":"a","ة":"a","ء":"","ئ":"y","ؤ":"w"}
+    o=""
+    for c in str(text).lower():
+        if c in ar: o+=ar[c]
+        elif c.isascii() and c.isalnum(): o+=c
+        elif c in " -_": o+="-"
+    return re.sub(r"-+","-",o).strip("-") or "perfume"
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# HELPER: GOOGLE IMAGE SEARCH
-# ═══════════════════════════════════════════════════════════════════════════════
-def fetch_image(perfume_name: str, is_tester: bool = False) -> str:
-    gkey = st.session_state.google_api_key
-    gcse = st.session_state.google_cse_id
-    if not gkey or not gcse:
-        return ""
+def fetch_image(name:str,tester:bool=False)->str:
+    k=st.session_state.google_api; cx=st.session_state.google_cse
+    if not k or not cx: return ""
     try:
-        q = perfume_name + (" tester box bottle" if is_tester else " perfume bottle")
-        r = requests.get(
-            "https://www.googleapis.com/customsearch/v1",
-            params={"key": gkey, "cx": gcse, "q": q,
-                    "searchType": "image", "num": 1, "imgSize": "large"},
-            timeout=10
-        )
-        items = r.json().get("items", [])
+        q=name+(" tester box" if tester else " perfume bottle")
+        r=requests.get("https://www.googleapis.com/customsearch/v1",
+            params={"key":k,"cx":cx,"q":q,"searchType":"image","num":1,"imgSize":"large"},timeout=10)
+        items=r.json().get("items",[])
         return items[0]["link"] if items else ""
-    except:
-        return ""
+    except: return ""
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# HELPER: SEO GENERATION (no AI call needed)
-# ═══════════════════════════════════════════════════════════════════════════════
-def generate_seo(name: str, brand: dict, size: str,
-                 is_tester: bool, gender: str) -> dict:
-    brand_en = ""
-    if brand.get("name"):
-        parts = re.split(r"\s*\|\s*", brand["name"])
-        brand_en = parts[-1].strip() if len(parts) > 1 else parts[0]
-    prefix = "تستر" if is_tester else "عطر"
-    page_title = f"{prefix} {name} {size} | {brand_en}".strip()
-    page_desc  = f"تسوق {prefix} {name} {size} الأصلي من {brand.get('name','')}. عطر {gender} فاخر ثابت. أصلي 100% من مهووس."
-    if len(page_desc) > 160:
-        page_desc = page_desc[:157] + "..."
-    url = to_slug(f"{brand_en}-{name}-{size}".replace("مل", "ml"))
-    alt = f"زجاجة {prefix} {name} {size} الأصلية"
-    return {"url": url, "page_title": page_title, "page_desc": page_desc, "alt": alt}
+def gen_seo(name:str,brand:dict,size:str,tester:bool,gender:str)->dict:
+    bname=brand.get("name","")
+    parts=re.split(r"\s*\|\s*",bname); ben=parts[-1].strip() if len(parts)>1 else bname
+    pref="تستر" if tester else "عطر"
+    title=f"{pref} {name} {size} | {ben}".strip()
+    desc=f"تسوق {pref} {name} {size} الأصلي من {bname}. عطر {gender} فاخر ثابت. أصلي 100% من مهووس."
+    if len(desc)>160: desc=desc[:157]+"..."
+    return {"url":to_slug(f"{ben}-{name}-{size}".replace("مل","ml")),
+            "title":title,"desc":desc,
+            "alt":f"زجاجة {pref} {name} {size} الأصلية"}
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# AI: SYSTEM PROMPT (injected once)
-# ═══════════════════════════════════════════════════════════════════════════════
-SYSTEM_PROMPT = """أنت خبير عالمي في كتابة أوصاف منتجات العطور الفاخرة، متخصص في SEO وGEO، تعمل حصرياً لمتجر "مهووس" (Mahwous) في السعودية.
+SYSTEM_PROMPT = """أنت خبير كتابة أوصاف عطور فاخرة تعمل لمتجر "مهووس" السعودي.
 
-## قواعد الأسلوب الصارمة
-- ممنوع منعاً باتاً استخدام الرموز التعبيرية (Emojis)
-- اكتب تركيز العطر دائماً: "أو دو بارفيوم"
+قواعد صارمة:
+- ممنوع الرموز التعبيرية (Emojis) نهائياً
+- التركيز دائماً: "أو دو بارفيوم"
 - أسلوبك: راقٍ 40%، ودود 25%، رومانسي 20%، تسويقي 15%
 - الطول: 1200-1500 كلمة
-- **الإخراج يجب أن يكون HTML خالصاً فقط** — بدون أي نص خارج الـ HTML
+- **الإخراج HTML خالص فقط** — لا نص خارج HTML
 
-## هيكل الوصف الإلزامي (HTML)
-```
+هيكل الوصف الإلزامي:
 <h2>[عطر/تستر] [الماركة] [الاسم] [التركيز] [الحجم] [للجنس]</h2>
-<p>فقرة افتتاحية عاطفية (100-150 كلمة). الكلمة المفتاحية في أول 50 كلمة. دعوة للشراء.</p>
+<p>فقرة افتتاحية عاطفية، الكلمة المفتاحية في أول 50 كلمة، دعوة للشراء.</p>
 <h3>تفاصيل المنتج</h3>
-<ul>
-  <li><strong>الماركة:</strong> [اسم الماركة مع رابط داخلي إن أُعطي]</li>
-  <li><strong>اسم العطر:</strong> ...</li>
-  <li><strong>الجنس:</strong> ...</li>
-  <li><strong>العائلة العطرية:</strong> ...</li>
-  <li><strong>الحجم:</strong> ...</li>
-  <li><strong>التركيز:</strong> أو دو بارفيوم</li>
-  <li><strong>نوع المنتج:</strong> [تستر/عادي]</li>
-</ul>
+<ul><li><strong>الماركة:</strong></li><li><strong>الجنس:</strong></li><li><strong>العائلة العطرية:</strong></li><li><strong>الحجم:</strong></li><li><strong>التركيز:</strong> أو دو بارفيوم</li></ul>
 <h3>رحلة العطر - الهرم العطري</h3>
-<ul>
-  <li><strong>المقدمة (Top Notes):</strong> ...</li>
-  <li><strong>القلب (Heart Notes):</strong> ...</li>
-  <li><strong>القاعدة (Base Notes):</strong> ...</li>
-</ul>
-<h3>لماذا تختار [اسم العطر]؟</h3>
-<ul>
-  <li><strong>الثبات والفوحان:</strong> ...</li>
-  <li><strong>التميز والأصالة:</strong> ...</li>
-  <li><strong>القيمة الاستثنائية:</strong> ...</li>
-  <li><strong>الجاذبية المضمونة:</strong> ...</li>
-</ul>
-<h3>متى وأين ترتدي [اسم العطر]؟</h3>
-<p>...</p>
-<h3>لمسة خبير من مهووس</h3>
-<p>...</p>
-<h3>الأسئلة الشائعة (FAQ)</h3>
-<ul>
-  <li><strong>كم يدوم العطر؟</strong> ...</li>
-  <li><strong>هل يناسب الاستخدام اليومي؟</strong> ...</li>
-  <li><strong>ما الفرق بين التستر والعادي؟</strong> ...</li>
-  <li><strong>ما العائلة العطرية؟</strong> ...</li>
-  <li><strong>هل يناسب الطقس الحار؟</strong> ...</li>
-  <li><strong>ما مناسبات ارتدائه؟</strong> ...</li>
-</ul>
-<p><strong>اكتشف المزيد:</strong> <a href="https://mahwous.com/brands">تسوق حسب الماركة</a> | <a href="https://mahwous.com/men">عطور رجالية</a> | <a href="https://mahwous.com/women">عطور نسائية</a></p>
-<p><strong>عالمك العطري يبدأ من مهووس.</strong> أصلي 100% | شحن سريع داخل السعودية.</p>
-```"""
+<ul><li><strong>المقدمة:</strong></li><li><strong>القلب:</strong></li><li><strong>القاعدة:</strong></li></ul>
+<h3>لماذا تختار هذا العطر؟</h3>
+<ul><li><strong>الثبات:</strong></li><li><strong>التميز:</strong></li><li><strong>القيمة:</strong></li><li><strong>الجاذبية:</strong></li></ul>
+<h3>متى وأين ترتديه؟</h3><p>...</p>
+<h3>لمسة خبير من مهووس</h3><p>...</p>
+<h3>الأسئلة الشائعة</h3>
+<ul><li><strong>كم يدوم؟</strong></li><li><strong>هل يناسب اليومي؟</strong></li><li><strong>الفرق بين التستر والعادي؟</strong></li><li><strong>العائلة العطرية؟</strong></li><li><strong>يناسب الطقس الحار؟</strong></li><li><strong>مناسبات الارتداء؟</strong></li></ul>
+<p><strong>عالمك العطري يبدأ من مهووس.</strong> أصلي 100% | شحن سريع داخل السعودية.</p>"""
 
-def generate_description(name: str, is_tester: bool, brand: dict,
-                          size: str, gender: str, concentration: str) -> str:
-    api_key = st.session_state.api_key
-    if not api_key:
-        return "<p>⚠️ لم يتم ضبط مفتاح Anthropic API</p>"
-    client = anthropic.Anthropic(api_key=api_key)
-    brand_link = ""
-    if brand.get("page_url"):
-        brand_link = f'رابط صفحة الماركة: <a href="https://mahwous.com/{brand["page_url"]}">{brand["name"]}</a>'
-    ptype = "تستر" if is_tester else "عطر"
-    prompt = f"""اكتب وصفاً HTML احترافياً كاملاً للمنتج التالي:
-- نوع: {ptype}
-- الاسم: {name}
-- الماركة: {brand.get("name", "غير محدد")} {brand_link}
-- الحجم: {size}
-- التركيز: {concentration}
-- الجنس: {gender}
-- هل هو تستر: {"نعم" if is_tester else "لا"}
-
-أعد HTML خالصاً فقط بدون أي نص خارجي."""
+def gen_desc(name:str,tester:bool,brand:dict,size:str,gender:str,conc:str)->str:
+    key=st.session_state.api_key
+    if not key: return "<p>⚠️ لم يتم ضبط مفتاح Anthropic API في الإعدادات</p>"
     try:
-        msg = client.messages.create(
-            model="claude-opus-4-5",
-            max_tokens=4096,
+        client=anthropic.Anthropic(api_key=key)
+        ptype="تستر" if tester else "عطر"
+        blink=""
+        if brand.get("page_url"):
+            blink=f'— رابط: <a href="https://mahwous.com/{brand["page_url"]}">{brand["name"]}</a>'
+        msg=client.messages.create(
+            model="claude-opus-4-5", max_tokens=4096,
             system=SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": prompt}]
-        )
+            messages=[{"role":"user","content":
+                f"اكتب وصفاً HTML كاملاً:\n"
+                f"- النوع: {ptype}\n- الاسم: {name}\n"
+                f"- الماركة: {brand.get('name','غير محدد')} {blink}\n"
+                f"- الحجم: {size}\n- التركيز: {conc}\n- الجنس: {gender}\n"
+                f"أعد HTML خالصاً فقط."}])
         return msg.content[0].text
     except Exception as e:
-        return f"<p>خطأ: {e}</p>"
+        return f"<p>خطأ في توليد الوصف: {e}</p>"
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# EXPORT: SALLA PRODUCT XLSX  (exact 2-row-header format)
-# ═══════════════════════════════════════════════════════════════════════════════
-def build_salla_product_xlsx(df: pd.DataFrame) -> bytes:
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Salla Products Template Sheet"
+# ══════════════════════════════════════════════════════════════
+# EXPORT FUNCTIONS
+# ══════════════════════════════════════════════════════════════
+def export_product_xlsx(df:pd.DataFrame)->bytes:
+    wb=Workbook(); ws=wb.active; ws.title="Salla Products Template Sheet"
+    GOLD="B8933A"; DARK="0F0E0D"; LGOLD="E8D5B7"
+    ws.cell(1,1,"بيانات المنتج")
+    ws.merge_cells(start_row=1,start_column=1,end_row=1,end_column=len(SALLA_PRODUCT_COLS))
+    c=ws.cell(1,1)
+    c.font=Font(bold=True,color="FFFFFF",name="Cairo",size=11)
+    c.fill=PatternFill("solid",fgColor=DARK)
+    c.alignment=Alignment(horizontal="center",vertical="center")
+    ws.row_dimensions[1].height=26
+    for i,col in enumerate(SALLA_PRODUCT_COLS,1):
+        c=ws.cell(2,i,col)
+        c.font=Font(bold=True,color=DARK,name="Cairo",size=8)
+        c.fill=PatternFill("solid",fgColor=LGOLD)
+        c.alignment=Alignment(horizontal="center",vertical="center",wrap_text=True,reading_order=2)
+        c.border=Border(bottom=Side(style="thin",color=GOLD))
+    ws.row_dimensions[2].height=30
+    for ri,(_, row) in enumerate(df.iterrows(),3):
+        for ci,col in enumerate(SALLA_PRODUCT_COLS,1):
+            v=str(row.get(col,"") if pd.notna(row.get(col,"")) else "")
+            c=ws.cell(ri,ci,v)
+            c.alignment=Alignment(horizontal="right",vertical="top",
+                                   wrap_text=(col=="الوصف"),reading_order=2)
+            if ri%2==0: c.fill=PatternFill("solid",fgColor="FAFAF8")
+        ws.row_dimensions[ri].height=18
+    WIDTHS={"أسم المنتج":45,"الوصف":55,"تصنيف المنتج":38,
+            "صورة المنتج":48,"الماركة":24,"No.":13}
+    for i,col in enumerate(SALLA_PRODUCT_COLS,1):
+        ws.column_dimensions[get_column_letter(i)].width=WIDTHS.get(col,14)
+    ws.freeze_panes="A3"
+    b=io.BytesIO(); wb.save(b); b.seek(0); return b.read()
 
-    GOLD = "B8933A"; DARK = "0F0E0D"; LIGHT_GOLD = "E8D5B7"; WHITE = "FFFFFF"
-
-    # Row 1 — section header
-    ws.cell(1, 1, "بيانات المنتج")
-    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(SALLA_PRODUCT_COLS))
-    c = ws.cell(1, 1)
-    c.font      = Font(bold=True, color=WHITE, name="Cairo", size=12)
-    c.fill      = PatternFill("solid", fgColor=DARK)
-    c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-    ws.row_dimensions[1].height = 28
-
-    # Row 2 — column headers
-    for i, col in enumerate(SALLA_PRODUCT_COLS, 1):
-        c = ws.cell(2, i, col)
-        c.font      = Font(bold=True, color=DARK, name="Cairo", size=9)
-        c.fill      = PatternFill("solid", fgColor=LIGHT_GOLD)
-        c.alignment = Alignment(horizontal="center", vertical="center",
-                                wrap_text=True, reading_order=2)
-        c.border    = Border(
-            bottom=Side(style="thin", color=GOLD),
-            right=Side(style="hair", color="D5C9B0")
-        )
-    ws.row_dimensions[2].height = 32
-
-    # Data rows from row 3
-    for row_idx, (_, row) in enumerate(df.iterrows(), 3):
-        for col_idx, col_name in enumerate(SALLA_PRODUCT_COLS, 1):
-            val = row.get(col_name, "") if col_name in df.columns else ""
-            c   = ws.cell(row_idx, col_idx, str(val) if pd.notna(val) else "")
-            c.alignment = Alignment(
-                horizontal="right", vertical="top",
-                wrap_text=(col_name == "الوصف"), reading_order=2
-            )
-            if row_idx % 2 == 0:
-                c.fill = PatternFill("solid", fgColor="FAFAF8")
-        ws.row_dimensions[row_idx].height = 18
-
-    # Column widths
-    widths = {"أسم المنتج": 45, "الوصف": 60, "تصنيف المنتج": 40,
-              "صورة المنتج": 50, "الماركة": 25, "No.": 14}
-    for i, col in enumerate(SALLA_PRODUCT_COLS, 1):
-        w = widths.get(col, 16)
-        ws.column_dimensions[get_column_letter(i)].width = w
-
-    ws.freeze_panes = "A3"
-
-    buf = io.BytesIO(); wb.save(buf); buf.seek(0)
-    return buf.read()
-
-def build_salla_product_csv(df: pd.DataFrame) -> bytes:
-    out = io.StringIO()
-    # Row 1: section header
-    out.write("بيانات المنتج" + "," * (len(SALLA_PRODUCT_COLS)-1) + "\n")
-    # Row 2: column names
-    out.write(",".join(SALLA_PRODUCT_COLS) + "\n")
-    # Data
-    for _, row in df.iterrows():
-        vals = [str(row.get(c,"") if pd.notna(row.get(c,"")) else "") for c in SALLA_PRODUCT_COLS]
-        vals = [f'"{v}"' if "," in v or "\n" in v else v for v in vals]
-        out.write(",".join(vals) + "\n")
+def export_product_csv(df:pd.DataFrame)->bytes:
+    out=io.StringIO()
+    out.write("بيانات المنتج"+","*(len(SALLA_PRODUCT_COLS)-1)+"\n")
+    out.write(",".join(SALLA_PRODUCT_COLS)+"\n")
+    for _,row in df.iterrows():
+        vals=[]
+        for c in SALLA_PRODUCT_COLS:
+            v=str(row.get(c,"") if pd.notna(row.get(c,"")) else "")
+            vals.append(f'"{v}"' if any(x in v for x in [",","\n",'"']) else v)
+        out.write(",".join(vals)+"\n")
     return out.getvalue().encode("utf-8-sig")
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# EXPORT: SALLA SEO XLSX
-# ═══════════════════════════════════════════════════════════════════════════════
-def build_salla_seo_xlsx(df: pd.DataFrame) -> bytes:
-    wb = Workbook(); ws = wb.active
-    ws.title = "Salla Product Seo Sheet"
-    GOLD = "B8933A"; DARK = "1A1510"; LIGHT = "FFF8E1"
+def export_seo_xlsx(df:pd.DataFrame)->bytes:
+    wb=Workbook(); ws=wb.active; ws.title="Salla Product Seo Sheet"
+    for i,col in enumerate(SALLA_SEO_COLS,1):
+        c=ws.cell(1,i,col)
+        c.font=Font(bold=True,color="FFFFFF",name="Cairo",size=9)
+        c.fill=PatternFill("solid",fgColor="1A1510")
+        c.alignment=Alignment(horizontal="center",vertical="center",wrap_text=True,reading_order=2)
+    ws.row_dimensions[1].height=28
+    for ri,(_, row) in enumerate(df.iterrows(),2):
+        for ci,col in enumerate(SALLA_SEO_COLS,1):
+            v=str(row.get(col,"") if pd.notna(row.get(col,"")) else "")
+            c=ws.cell(ri,ci,v)
+            c.alignment=Alignment(horizontal="right",vertical="top",wrap_text=True,reading_order=2)
+            if ri%2==0: c.fill=PatternFill("solid",fgColor="FFF8E1")
+        ws.row_dimensions[ri].height=18
+    WIDTHS={"اسم المنتج (غير قابل للتعديل)":50,
+            "وصف صفحة المنتج (SEO Page Description)":65,
+            "عنوان صفحة المنتج (SEO Page Title)":52}
+    for i,col in enumerate(SALLA_SEO_COLS,1):
+        ws.column_dimensions[get_column_letter(i)].width=WIDTHS.get(col,22)
+    ws.freeze_panes="A2"
+    b=io.BytesIO(); wb.save(b); b.seek(0); return b.read()
 
-    for i, col in enumerate(SALLA_SEO_COLS, 1):
-        c = ws.cell(1, i, col)
-        c.font      = Font(bold=True, color="FFFFFF", name="Cairo", size=9)
-        c.fill      = PatternFill("solid", fgColor=DARK)
-        c.alignment = Alignment(horizontal="center", vertical="center",
-                                wrap_text=True, reading_order=2)
-        c.border    = Border(bottom=Side(style="medium", color=GOLD))
-    ws.row_dimensions[1].height = 30
-
-    for row_idx, (_, row) in enumerate(df.iterrows(), 2):
-        for col_idx, col in enumerate(SALLA_SEO_COLS, 1):
-            val = row.get(col, "") if col in df.columns else ""
-            c   = ws.cell(row_idx, col_idx, str(val) if pd.notna(val) else "")
-            c.alignment = Alignment(horizontal="right", vertical="top",
-                                    wrap_text=True, reading_order=2)
-            if row_idx % 2 == 0:
-                c.fill = PatternFill("solid", fgColor=LIGHT)
-        ws.row_dimensions[row_idx].height = 18
-
-    for i, col in enumerate(SALLA_SEO_COLS, 1):
-        w = {"اسم المنتج (غير قابل للتعديل)": 50,
-             "وصف صفحة المنتج (SEO Page Description)": 70,
-             "عنوان صفحة المنتج (SEO Page Title)": 55}.get(col, 22)
-        ws.column_dimensions[get_column_letter(i)].width = w
-
-    ws.freeze_panes = "A2"
-    buf = io.BytesIO(); wb.save(buf); buf.seek(0)
-    return buf.read()
-
-def build_salla_seo_csv(df: pd.DataFrame) -> bytes:
-    out = io.StringIO()
-    out.write(",".join(SALLA_SEO_COLS) + "\n")
-    for _, row in df.iterrows():
-        vals = [str(row.get(c,"") if pd.notna(row.get(c,"")) else "") for c in SALLA_SEO_COLS]
-        vals = [f'"{v}"' if "," in v or "\n" in v else v for v in vals]
-        out.write(",".join(vals) + "\n")
+def export_seo_csv(df:pd.DataFrame)->bytes:
+    out=io.StringIO()
+    out.write(",".join(SALLA_SEO_COLS)+"\n")
+    for _,row in df.iterrows():
+        vals=[]
+        for c in SALLA_SEO_COLS:
+            v=str(row.get(c,"") if pd.notna(row.get(c,"")) else "")
+            vals.append(f'"{v}"' if any(x in v for x in [",","\n"]) else v)
+        out.write(",".join(vals)+"\n")
     return out.getvalue().encode("utf-8-sig")
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# BUILD PRODUCT ROW (single row for the working DataFrame)
-# ═══════════════════════════════════════════════════════════════════════════════
-def build_product_row(
-    product_no, name, is_tester, gender, size, concentration,
-    price, sku, image_url, description, brand, category, seo
-) -> dict:
-    row = {col: "" for col in SALLA_PRODUCT_COLS}
-    row["No."]                    = str(product_no) if product_no else ""
-    row["النوع "]                 = "منتج"
-    row["أسم المنتج"]             = str(name)
-    row["تصنيف المنتج"]           = category
-    row["صورة المنتج"]            = image_url
-    row["وصف صورة المنتج"]        = seo.get("alt", "")
-    row["نوع المنتج"]             = "منتج جاهز"
-    row["سعر المنتج"]             = str(price) if price else ""
-    row["الوصف"]                  = description
-    row["هل يتطلب شحن؟"]         = "نعم"
-    row["رمز المنتج sku"]         = str(sku) if sku else ""
-    row["الوزن"]                  = "0.2"
-    row["وحدة الوزن"]             = "kg"
-    row["حالة المنتج"]            = "مرئي"
-    row["الماركة"]                = brand.get("name", "")
-    row["خاضع للضريبة ؟"]        = "نعم"
-    row["اقصي كمية لكل عميل"]    = "0"
-    row["إخفاء خيار تحديد الكمية"] = "0"
-    row["اضافة صورة عند الطلب"]  = "0"
-    return row
-
-# ═══════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════
 # SIDEBAR
-# ═══════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════
 with st.sidebar:
-    st.markdown("## ⚙️ الإعدادات")
-
-    # API Keys
-    with st.expander("🔑 مفاتيح API", expanded=False):
-        k = st.text_input("Anthropic API Key", value=st.session_state.api_key,
-                          type="password", key="inp_ant")
-        if k: st.session_state.api_key = k
-
-        gk = st.text_input("Google API Key", value=st.session_state.google_api_key,
-                           type="password", key="inp_gk")
-        if gk: st.session_state.google_api_key = gk
-
-        gc = st.text_input("Google CSE ID", value=st.session_state.google_cse_id,
-                           key="inp_gc")
-        if gc: st.session_state.google_cse_id = gc
-
+    st.markdown("""
+    <div style="text-align:center;padding:16px 0 8px">
+      <div style="font-size:2.2rem">🌸</div>
+      <div style="color:#b8933a;font-size:1.2rem;font-weight:900">مهووس</div>
+      <div style="color:rgba(255,255,255,0.35);font-size:0.72rem">Mahwous v3.0</div>
+    </div>
+    """, unsafe_allow_html=True)
     st.divider()
 
-    # Reference data status
-    st.markdown("### 📚 قواعد البيانات المرجعية")
-
-    brands_ok = st.session_state.brands_df is not None
-    cats_ok   = st.session_state.categories_df is not None
-    st.markdown(
-        f"{'✅' if brands_ok else '❌'} الماركات: "
-        f"{'**%d ماركة**' % len(st.session_state.brands_df) if brands_ok else 'غير محملة'}"
-    )
-    st.markdown(
-        f"{'✅' if cats_ok else '❌'} التصنيفات: "
-        f"{'**%d تصنيف**' % len(st.session_state.categories_df) if cats_ok else 'غير محملة'}"
-    )
-
-    with st.expander("🔄 تحديث الملفات المرجعية"):
-        bf = st.file_uploader("ماركات مهووس (CSV/Excel)", type=["csv","xlsx"], key="up_brands")
-        if bf:
-            st.session_state.brands_df = read_any_file(bf)
-            st.success(f"✅ تم رفع {len(st.session_state.brands_df)} ماركة")
-
-        cf = st.file_uploader("تصنيفات مهووس (CSV/Excel)", type=["csv","xlsx"], key="up_cats")
-        if cf:
-            st.session_state.categories_df = read_any_file(cf)
-            st.success(f"✅ تم رفع {len(st.session_state.categories_df)} تصنيف")
+    # Navigation
+    pages = [
+        ("📁","مدير الملفات","manager"),
+        ("➕","منتج جديد سريع","new"),
+        ("🔍","دمج SEO","seo"),
+        ("💰","تحديث الأسعار","price"),
+        ("⚙️","الإعدادات","settings"),
+    ]
+    for icon,label,key in pages:
+        is_active = st.session_state.page == key
+        if st.button(f"{icon}  {label}", use_container_width=True,
+                     type="primary" if is_active else "secondary",
+                     key=f"nav_{key}"):
+            st.session_state.page = key
+            st.rerun()
 
     st.divider()
-    if st.button("🗑️ مسح كل البيانات", use_container_width=True):
-        for k in ["working_df", "results_df", "col_map", "processing_log"]:
-            st.session_state[k] = [] if k == "processing_log" else None
-        st.session_state.step = 1
-        st.rerun()
+    # Status indicators
+    bok = st.session_state.brands_df is not None
+    cok = st.session_state.categories_df is not None
+    aok = bool(st.session_state.api_key)
+    st.markdown(f"""
+    <div style="font-size:0.78rem;padding:4px 0">
+      {'✅' if bok else '❌'} الماركات: {len(st.session_state.brands_df) if bok else 'غير محملة'}
+    </div>
+    <div style="font-size:0.78rem;padding:4px 0">
+      {'✅' if cok else '❌'} التصنيفات: {len(st.session_state.categories_df) if cok else 'غير محملة'}
+    </div>
+    <div style="font-size:0.78rem;padding:4px 0">
+      {'✅' if aok else '❌'} Claude API: {'متصل' if aok else 'غير مضبوط'}
+    </div>
+    """, unsafe_allow_html=True)
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# MAIN HEADER
-# ═══════════════════════════════════════════════════════════════════════════════
-st.markdown("""
-<div class="main-header">
-  <div style="font-size:2.5rem">🌸</div>
-  <div>
-    <h1>مهووس — نظام إدارة المنتجات الذكي</h1>
-    <p>Mahwous AI-Powered Product Automation for Salla Platform</p>
-  </div>
+    if st.session_state.fm_df is not None:
+        st.divider()
+        st.markdown(f"""
+        <div style="background:rgba(184,147,58,0.12);border-radius:8px;padding:10px;font-size:0.8rem">
+          <div style="font-weight:700;margin-bottom:4px">📄 الملف المفتوح</div>
+          <div style="color:#b8933a;font-size:0.85rem">{st.session_state.fm_filename}</div>
+          <div style="color:rgba(255,255,255,0.5)">
+            {len(st.session_state.fm_df)} صف | {len(st.session_state.fm_df.columns)} عمود
+          </div>
+        </div>
+        """, unsafe_allow_html=True)
+        if st.button("🗑️ إغلاق الملف", use_container_width=True):
+            st.session_state.fm_df = None
+            st.session_state.fm_seo_df = None
+            st.session_state.fm_filename = ""
+            st.rerun()
+
+# ══════════════════════════════════════════════════════════════
+# TOP BAR
+# ══════════════════════════════════════════════════════════════
+page_titles = {
+    "manager":  ("📁 مدير الملفات الشامل", "ارفع أي ملف، عدّل، أكمل بالذكاء الاصطناعي، وصدّر لسلة"),
+    "new":      ("➕ منتج جديد سريع", "أعطِ الاسم والذكاء الاصطناعي يكمل الباقي"),
+    "seo":      ("🔍 دمج بيانات SEO", "اربط ملف منتجات سلة بملف SEO"),
+    "price":    ("💰 تحديث الأسعار", "تحديث الأسعار من أي ملف"),
+    "settings": ("⚙️ الإعدادات", "مفاتيح API وقواعد البيانات المرجعية"),
+}
+t,s = page_titles.get(st.session_state.page,("مهووس",""))
+st.markdown(f"""
+<div class="top-bar">
+  <div class="logo-circle">م</div>
+  <div><h1>{t}</h1><p>{s}</p></div>
 </div>
 """, unsafe_allow_html=True)
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# MODE SELECTOR
-# ═══════════════════════════════════════════════════════════════════════════════
-st.markdown("### 🎯 اختر وضع العمل")
-col1, col2, col3, col4 = st.columns(4)
+# ══════════════════════════════════════════════════════════════
+# ████  PAGE: FILE MANAGER  ████████████████████████████████████
+# ══════════════════════════════════════════════════════════════
+if st.session_state.page == "manager":
 
-with col1:
-    if st.button("➕ منتجات جديدة\nمن قائمة أسماء", use_container_width=True,
-                 type="primary" if st.session_state.mode == "new" else "secondary"):
-        st.session_state.mode = "new"; st.session_state.step = 1; st.rerun()
+    # ── UPLOAD SECTION (always visible at top) ────────────────
+    st.markdown("""
+    <div class="sec-header"><div class="bar"></div><h3>رفع الملف</h3></div>
+    """, unsafe_allow_html=True)
 
-with col2:
-    if st.button("✏️ تعديل ملف\nمنتجات سلة", use_container_width=True,
-                 type="primary" if st.session_state.mode == "edit" else "secondary"):
-        st.session_state.mode = "edit"; st.session_state.step = 1; st.rerun()
-
-with col3:
-    if st.button("🔍 دمج بيانات\nالـ SEO", use_container_width=True,
-                 type="primary" if st.session_state.mode == "seo_merge" else "secondary"):
-        st.session_state.mode = "seo_merge"; st.session_state.step = 1; st.rerun()
-
-with col4:
-    if st.button("💰 تحديث\nالأسعار", use_container_width=True,
-                 type="primary" if st.session_state.mode == "price" else "secondary"):
-        st.session_state.mode = "price"; st.session_state.step = 1; st.rerun()
-
-st.markdown('<hr class="gold-divider">', unsafe_allow_html=True)
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# ██████████  MODE: NEW PRODUCTS  ██████████████████████████████████████████████
-# ═══════════════════════════════════════════════════════════════════════════════
-if st.session_state.mode == "new":
-    st.markdown("## ➕ إضافة منتجات جديدة")
-    st.caption("ارفع ملفاً يحتوي أسماء العطور (أو أي عمود آخر) وسيكمل النظام باقي البيانات تلقائياً.")
-
-    # ── STEP 1: Upload & Map ──────────────────────────────────────────────────
-    st.markdown("### الخطوة 1: رفع الملف وتعيين الأعمدة")
-
-    uploaded = st.file_uploader(
-        "ارفع ملف CSV أو Excel (أعمدة حرة — من أي مورد)",
-        type=["csv", "xlsx", "xls"],
-        key="up_new"
-    )
+    up_col1, up_col2 = st.columns([3,1])
+    with up_col1:
+        uploaded = st.file_uploader(
+            "ارفع أي ملف Excel أو CSV (من أي مصدر — ملفات سلة، ملفات موردين، قوائم أسماء...)",
+            type=["csv","xlsx","xls","xlsm"],
+            label_visibility="collapsed",
+            key="fm_uploader"
+        )
+    with up_col2:
+        salla_fmt = st.checkbox("ملف سلة (صفان في الرأس)", value=False, key="fm_salla_fmt")
 
     if uploaded:
-        raw_df = read_any_file(uploaded)
-        if not raw_df.empty:
-            cols_list = ["— اختر —"] + list(raw_df.columns)
-            st.success(f"✅ تم قراءة الملف: **{len(raw_df)} صف** و **{len(raw_df.columns)} عمود**")
-            with st.expander("👀 معاينة الملف الأصلي", expanded=False):
-                st.dataframe(raw_df.head(10), use_container_width=True)
+        df_raw = read_file(uploaded, salla_format=salla_fmt)
+        if not df_raw.empty:
+            st.session_state.fm_filename = uploaded.name
+            # If columns match Salla format already, use as-is; else keep as raw
+            st.session_state.fm_df = df_raw
+            st.session_state.fm_col_map = {}
+            st.rerun()
 
-            st.markdown("**تعيين الأعمدة:**")
-            c1, c2, c3 = st.columns(3)
+    # ── COLUMN MAPPING (if file loaded but not yet mapped) ────
+    if st.session_state.fm_df is not None:
+        df = st.session_state.fm_df
+
+        # Check if it's already a salla-format file
+        has_salla_cols = sum(1 for c in SALLA_PRODUCT_COLS if c in df.columns)
+        is_salla = has_salla_cols >= 5
+
+        if not is_salla and not st.session_state.fm_col_map:
+            st.markdown("""<hr class="gdiv">
+            <div class="sec-header"><div class="bar"></div><h3>تعيين الأعمدة — خبرني أين هو كل عمود</h3></div>
+            """, unsafe_allow_html=True)
+            st.markdown(f"""
+            <div class="alert-info">
+              وجدت <b>{len(df.columns)}</b> عمود و <b>{len(df)}</b> صف.
+              حدد أي عمود يمثل كل حقل:
+            </div>
+            """, unsafe_allow_html=True)
+
+            with st.expander("👀 معاينة الملف الأصلي", expanded=True):
+                st.dataframe(df.head(8), use_container_width=True)
+
+            cols_opts = ["— لا يوجد —"] + list(df.columns)
+
+            def best_guess(keywords):
+                for kw in keywords:
+                    for c in df.columns:
+                        if kw.lower() in c.lower(): return c
+                return "— لا يوجد —"
+
+            c1,c2,c3 = st.columns(3)
             with c1:
-                name_col = st.selectbox("عمود اسم المنتج / العطر *", cols_list, key="nc")
+                col_name  = st.selectbox("اسم المنتج / العطر *", cols_opts,
+                    index=cols_opts.index(best_guess(["اسم","name","منتج","عطر"])),key="cm_name")
+                col_price = st.selectbox("السعر",cols_opts,
+                    index=cols_opts.index(best_guess(["سعر","price"])),key="cm_price")
             with c2:
-                price_col = st.selectbox("عمود السعر (اختياري)", cols_list, key="pc")
+                col_sku   = st.selectbox("رمز SKU",cols_opts,
+                    index=cols_opts.index(best_guess(["sku","رمز","barcode"])),key="cm_sku")
+                col_size  = st.selectbox("الحجم",cols_opts,
+                    index=cols_opts.index(best_guess(["حجم","size","مل","ml"])),key="cm_size")
             with c3:
-                sku_col = st.selectbox("عمود SKU (اختياري)", cols_list, key="sc")
+                col_img   = st.selectbox("رابط الصورة",cols_opts,
+                    index=cols_opts.index(best_guess(["صورة","image","img","photo","url"])),key="cm_img")
+                col_desc  = st.selectbox("الوصف",cols_opts,
+                    index=cols_opts.index(best_guess(["وصف","desc"])),key="cm_desc")
 
-            c4, c5, c6 = st.columns(3)
+            c4,c5,c6 = st.columns(3)
             with c4:
-                size_col = st.selectbox("عمود الحجم (اختياري)", cols_list, key="szc")
+                col_gender= st.selectbox("الجنس",cols_opts,
+                    index=cols_opts.index(best_guess(["جنس","gender","sex"])),key="cm_gender")
             with c5:
-                gender_col = st.selectbox("عمود الجنس (اختياري)", cols_list, key="gc_")
+                col_brand = st.selectbox("الماركة",cols_opts,
+                    index=cols_opts.index(best_guess(["ماركة","brand","علامة"])),key="cm_brand")
             with c6:
-                tester_col = st.selectbox("عمود تستر/عادي (اختياري)", cols_list, key="tc")
+                col_tester= st.selectbox("تستر؟",cols_opts,
+                    index=cols_opts.index(best_guess(["تستر","tester"])),key="cm_tester")
 
-            st.divider()
-            st.markdown("**الإعدادات الافتراضية** (تُطبق عند غياب العمود المقابل):")
-            d1, d2, d3, d4 = st.columns(4)
-            with d1:
-                default_gender = st.selectbox("الجنس الافتراضي",
-                    ["للجنسين","للرجال","للنساء"], key="dg")
-            with d2:
-                default_size = st.text_input("الحجم الافتراضي", "100 مل", key="ds")
-            with d3:
-                default_conc = st.selectbox("التركيز الافتراضي",
-                    ["أو دو بارفيوم","أو دو كولون","أو دو تواليت","بارفيوم"], key="dc")
-            with d4:
-                default_tester = st.selectbox("النوع الافتراضي",
-                    ["عطر عادي","تستر"], key="dt")
+            st.markdown("**الإعدادات الافتراضية:**")
+            d1,d2,d3,d4 = st.columns(4)
+            with d1: dft_gender = st.selectbox("الجنس الافتراضي",["للجنسين","للرجال","للنساء"],key="dg2")
+            with d2: dft_size   = st.text_input("الحجم الافتراضي","100 مل",key="ds2")
+            with d3: dft_conc   = st.selectbox("التركيز الافتراضي",["أو دو بارفيوم","أو دو كولون","أو دو تواليت","بارفيوم"],key="dc2")
+            with d4: dft_type   = st.selectbox("النوع الافتراضي",["عطر عادي","تستر"],key="dt2")
 
-            gen_images  = st.checkbox("🖼 جلب الصور تلقائياً (Google CSE)", value=False, key="gi")
-            gen_desc    = st.checkbox("🤖 توليد الوصف بالذكاء الاصطناعي", value=True, key="gd")
+            if col_name != "— لا يوجد —":
+                if st.button("✅ تأكيد تعيين الأعمدة وتحويل الملف", type="primary", key="confirm_map"):
+                    # Build Salla-format DataFrame
+                    rows = []
+                    for _,row in df.iterrows():
+                        def gv(c): return str(row.get(c,"") if c!="— لا يوجد —" and c in df.columns else "")
+                        name = gv(col_name).strip()
+                        if not name or name.lower() in ("nan","none",""): continue
 
-            if name_col == "— اختر —":
-                st.warning("⚠️ يرجى تحديد عمود اسم المنتج")
-            else:
-                if st.button("🚀 ابدأ المعالجة", type="primary", key="proc_new"):
-                    rows_out   = []
-                    seo_out    = []
-                    log        = []
-                    progress   = st.progress(0)
-                    status_box = st.empty()
-                    total      = len(raw_df)
+                        price  = gv(col_price)
+                        sku    = gv(col_sku)
+                        size   = gv(col_size).strip() or dft_size
+                        img    = gv(col_img)
+                        desc   = gv(col_desc)
+                        gender = gv(col_gender).strip() or dft_gender
+                        brand_name = gv(col_brand)
+                        tester_v   = gv(col_tester)
+                        is_test = any(w in tester_v.lower() for w in ["تستر","tester","yes","نعم"]) if col_tester!="— لا يوجد —" else (dft_type=="تستر")
 
-                    for idx, src_row in raw_df.iterrows():
-                        pct = int((idx+1) / total * 100)
-                        progress.progress(pct)
+                        brand = match_brand(name) if not brand_name else {"name":brand_name,"page_url":""}
+                        cat   = match_category(name,gender)
+                        seo   = gen_seo(name,brand,size,is_test,gender)
 
-                        name = str(src_row.get(name_col, "")).strip()
-                        if not name or name.lower() in ("nan","none",""):
-                            log.append({"#": idx+1, "اسم": "فارغ", "حالة": "تجاهل"})
-                            continue
+                        nr = {c:"" for c in SALLA_PRODUCT_COLS}
+                        nr["النوع "]                  = "منتج"
+                        nr["أسم المنتج"]              = name
+                        nr["تصنيف المنتج"]            = cat
+                        nr["صورة المنتج"]             = img
+                        nr["وصف صورة المنتج"]         = seo["alt"]
+                        nr["نوع المنتج"]              = "منتج جاهز"
+                        nr["سعر المنتج"]              = price
+                        nr["الوصف"]                   = desc
+                        nr["هل يتطلب شحن؟"]          = "نعم"
+                        nr["رمز المنتج sku"]          = sku
+                        nr["الوزن"]                   = "0.2"
+                        nr["وحدة الوزن"]              = "kg"
+                        nr["حالة المنتج"]             = "مرئي"
+                        nr["الماركة"]                 = brand.get("name","")
+                        nr["خاضع للضريبة ؟"]         = "نعم"
+                        nr["اقصي كمية لكل عميل"]     = "0"
+                        nr["إخفاء خيار تحديد الكمية"]= "0"
+                        nr["اضافة صورة عند الطلب"]   = "0"
+                        rows.append(nr)
 
-                        status_box.info(f"⏳ معالجة ({idx+1}/{total}): **{name}**")
+                    st.session_state.fm_df = pd.DataFrame(rows)
+                    st.session_state.fm_col_map = {"mapped": True}
+                    st.success(f"✅ تم تحويل {len(rows)} صف إلى تنسيق سلة!")
+                    st.rerun()
+        else:
+            # Already Salla format or already mapped
+            if is_salla:
+                st.session_state.fm_df = ensure_salla_cols(df)
+                st.session_state.fm_col_map = {"mapped": True}
 
-                        # Resolve fields
-                        price    = src_row.get(price_col, "") if price_col != "— اختر —" else ""
-                        sku      = src_row.get(sku_col, "")   if sku_col   != "— اختر —" else ""
-                        size     = src_row.get(size_col, "")  if size_col  != "— اختر —" else ""
-                        gender   = src_row.get(gender_col,"") if gender_col!= "— اختر —" else ""
-                        tester_v = src_row.get(tester_col,"") if tester_col!= "— اختر —" else ""
+    # ── MAIN EDITOR (if file is ready in Salla format) ────────
+    if st.session_state.fm_df is not None and (
+            st.session_state.fm_col_map.get("mapped") or
+            sum(1 for c in SALLA_PRODUCT_COLS if c in st.session_state.fm_df.columns) >= 5):
 
-                        size    = str(size).strip()   if str(size).strip() not in ("","nan")   else default_size
-                        gender  = str(gender).strip() if str(gender).strip() not in ("","nan") else default_gender
-                        is_test = any(w in str(tester_v).lower() for w in ["تستر","tester","yes","نعم"]) if tester_col != "— اختر —" else (default_tester == "تستر")
-                        conc    = default_conc
+        df = st.session_state.fm_df
 
-                        brand    = match_brand(name)
-                        category = match_category(name, gender)
-                        seo      = generate_seo(name, brand, size, is_test, gender)
-                        image_url = fetch_image(name, is_test) if gen_images else ""
+        # ── Stats bar ──────────────────────────────────────────
+        n_total = len(df)
+        n_desc  = int((df.get("الوصف", pd.Series(dtype=str)).fillna("").str.strip() != "").sum())
+        n_img   = int((df.get("صورة المنتج", pd.Series(dtype=str)).fillna("").str.startswith("http").sum()))
+        n_brand = int((df.get("الماركة", pd.Series(dtype=str)).fillna("").str.strip() != "").sum())
+        n_price = int((df.get("سعر المنتج", pd.Series(dtype=str)).fillna("").str.strip() != "").sum())
 
-                        desc = ""
-                        if gen_desc:
-                            desc = generate_description(name, is_test, brand, size, gender, conc)
+        st.markdown(f"""
+        <div class="stat-row">
+          <div class="stat-card"><div class="n">{n_total}</div><div class="lbl">إجمالي المنتجات</div></div>
+          <div class="stat-card"><div class="n">{n_desc}</div><div class="lbl">مع وصف AI</div></div>
+          <div class="stat-card"><div class="n">{n_img}</div><div class="lbl">مع صورة</div></div>
+          <div class="stat-card"><div class="n">{n_brand}</div><div class="lbl">مع ماركة</div></div>
+          <div class="stat-card"><div class="n">{n_price}</div><div class="lbl">مع سعر</div></div>
+        </div>
+        """, unsafe_allow_html=True)
 
-                        prow = build_product_row(
-                            product_no="", name=name, is_tester=is_test,
-                            gender=gender, size=size, concentration=conc,
-                            price=price, sku=sku, image_url=image_url,
-                            description=desc, brand=brand,
-                            category=category, seo=seo
-                        )
-                        rows_out.append(prow)
-                        seo_out.append({
-                            "No. (غير قابل للتعديل)":       "",
-                            "اسم المنتج (غير قابل للتعديل)": prow["أسم المنتج"],
-                            "رابط مخصص للمنتج (SEO Page URL)":      seo["url"],
-                            "عنوان صفحة المنتج (SEO Page Title)":    seo["page_title"],
-                            "وصف صفحة المنتج (SEO Page Description)": seo["page_desc"],
-                        })
-                        log.append({"#": idx+1, "اسم": name,
-                                    "ماركة": brand.get("name","—"),
-                                    "تصنيف": category,
-                                    "صورة": "✅" if image_url else "—",
-                                    "وصف": "✅" if desc else "—",
-                                    "حالة": "✅ نجح"})
+        # ── TOOLBOX ────────────────────────────────────────────
+        st.markdown("""<hr class="gdiv">
+        <div class="sec-header"><div class="bar"></div><h3>أدوات المعالجة</h3></div>
+        """, unsafe_allow_html=True)
 
-                    progress.progress(100)
-                    status_box.success(f"✅ تمت معالجة {len(rows_out)} منتج بنجاح!")
-                    st.session_state.working_df = pd.DataFrame(rows_out)
-                    st.session_state.results_df  = pd.DataFrame(seo_out)
-                    st.session_state.processing_log = log
-                    st.session_state.step = 2
+        tool_tabs = st.tabs([
+            "🤖 توليد الأوصاف",
+            "🖼 جلب الصور",
+            "🏷 الماركات والتصنيفات",
+            "➕ إضافة منتج جديد",
+            "🔁 عمليات مجمّعة",
+        ])
+
+        # ── Tool: AI Descriptions ──────────────────────────────
+        with tool_tabs[0]:
+            st.markdown("**توليد الوصف بالذكاء الاصطناعي (Claude)**")
+            scope_d = st.radio("نطاق التوليد", [
+                "الصفوف التي ليس لها وصف فقط",
+                "صف محدد برقمه",
+                "كل الصفوف (يستغرق وقتاً)",
+            ], horizontal=True, key="scope_d")
+
+            d1,d2,d3 = st.columns(3)
+            with d1: dft_c = st.selectbox("التركيز",["أو دو بارفيوم","أو دو كولون","أو دو تواليت","بارفيوم"],key="desc_conc")
+            with d2: dft_g = st.selectbox("الجنس الافتراضي",["للجنسين","للرجال","للنساء"],key="desc_gender")
+            with d3: dft_s = st.text_input("الحجم الافتراضي","100 مل",key="desc_size")
+
+            if scope_d == "صف محدد برقمه":
+                row_idx = st.number_input("رقم الصف (يبدأ من 0)",0,max(0,len(df)-1),0,key="desc_row_idx")
+
+            if st.button("🚀 توليد الأوصاف الآن", type="primary", key="gen_desc_btn"):
+                if not st.session_state.api_key:
+                    st.error("أضف مفتاح Anthropic API في الإعدادات أولاً")
+                else:
+                    indices = []
+                    if scope_d.startswith("الصفوف التي"):
+                        indices = [i for i,r in df.iterrows() if not str(r.get("الوصف","")).strip()]
+                    elif scope_d.startswith("صف محدد"):
+                        indices = [row_idx]
+                    else:
+                        indices = list(range(len(df)))
+
+                    if not indices:
+                        st.info("لا توجد صفوف تحتاج وصفاً.")
+                    else:
+                        prog=st.progress(0); stat=st.empty()
+                        for n,i in enumerate(indices):
+                            row=df.iloc[i]
+                            name=str(row.get("أسم المنتج","")).strip()
+                            if not name: continue
+                            stat.info(f"⏳ ({n+1}/{len(indices)}) {name}")
+                            is_t=any(w in name.lower() for w in ["تستر","tester"])
+                            size_m=re.search(r"\d+\s*مل|\d+\s*ml",name,re.I)
+                            size=size_m.group() if size_m else dft_s
+                            brand=match_brand(name)
+                            gender=dft_g
+                            d=gen_desc(name,is_t,brand,size,gender,dft_c)
+                            df.at[i,"الوصف"]=d
+                            if not df.at[i,"الماركة"]: df.at[i,"الماركة"]=brand.get("name","")
+                            prog.progress(int((n+1)/len(indices)*100))
+                        st.session_state.fm_df=df
+                        stat.success(f"✅ تم توليد {len(indices)} وصف!")
+                        st.rerun()
+
+        # ── Tool: Image Fetching ───────────────────────────────
+        with tool_tabs[1]:
+            st.markdown("**جلب الصور عبر Google Custom Search API**")
+            if not (st.session_state.google_api and st.session_state.google_cse):
+                st.warning("أضف Google API Key و CSE ID في الإعدادات")
+            scope_i = st.radio("نطاق جلب الصور",[
+                "الصفوف التي ليس لها صورة فقط",
+                "صف محدد برقمه",
+                "كل الصفوف",
+            ], horizontal=True, key="scope_i")
+            if scope_i=="صف محدد برقمه":
+                img_row = st.number_input("رقم الصف",0,max(0,len(df)-1),0,key="img_row")
+            add_tester_kw = st.checkbox("إضافة 'tester' للبحث إذا كان المنتج تستراً",value=True)
+
+            if st.button("🖼 جلب الصور الآن",type="primary",key="fetch_img_btn"):
+                indices=[]
+                if scope_i.startswith("الصفوف التي"):
+                    indices=[i for i,r in df.iterrows() if not str(r.get("صورة المنتج","")).startswith("http")]
+                elif scope_i.startswith("صف محدد"):
+                    indices=[img_row]
+                else:
+                    indices=list(range(len(df)))
+
+                if not indices: st.info("لا توجد صفوف تحتاج صورة.")
+                else:
+                    prog=st.progress(0); stat=st.empty()
+                    fetched=0
+                    for n,i in enumerate(indices):
+                        row=df.iloc[i]
+                        name=str(row.get("أسم المنتج","")).strip()
+                        if not name: continue
+                        stat.info(f"🖼 ({n+1}/{len(indices)}) {name}")
+                        is_t = add_tester_kw and any(w in name.lower() for w in ["تستر","tester"])
+                        url=fetch_image(name,is_t)
+                        if url: df.at[i,"صورة المنتج"]=url; fetched+=1
+                        # Update alt text
+                        seo=gen_seo(name,match_brand(name),"",is_t,"للجنسين")
+                        df.at[i,"وصف صورة المنتج"]=seo["alt"]
+                        prog.progress(int((n+1)/len(indices)*100))
+                    st.session_state.fm_df=df
+                    stat.success(f"✅ تم جلب {fetched} صورة من {len(indices)} صف")
                     st.rerun()
 
-    # ── STEP 2: Review & Export ──────────────────────────────────────────────
-    if st.session_state.step >= 2 and st.session_state.working_df is not None:
-        st.markdown("---")
-        st.markdown("### الخطوة 2: مراجعة وتعديل النتائج")
+            # Manual image URL
+            st.divider()
+            st.markdown("**إضافة رابط صورة يدوياً لصف محدد:**")
+            m1,m2,m3=st.columns([1,3,1])
+            with m1: man_row=st.number_input("رقم الصف",0,max(0,len(df)-1),0,key="man_row")
+            with m2: man_url=st.text_input("رابط الصورة",placeholder="https://...",key="man_url")
+            with m3:
+                st.markdown("<br>",unsafe_allow_html=True)
+                if st.button("حفظ",key="save_man_img"):
+                    if man_url.startswith("http"):
+                        df.at[man_row,"صورة المنتج"]=man_url
+                        st.session_state.fm_df=df
+                        st.success("✅ تم حفظ الصورة")
+                        st.rerun()
 
-        # Metrics
-        df_w = st.session_state.working_df
-        m1, m2, m3, m4 = st.columns(4)
-        with m1: st.metric("إجمالي المنتجات", len(df_w))
-        with m2: st.metric("مع وصف AI", int((df_w["الوصف"] != "").sum()))
-        with m3: st.metric("مع صورة", int((df_w["صورة المنتج"] != "").sum()))
-        with m4: st.metric("مع ماركة", int((df_w["الماركة"] != "").sum()))
+        # ── Tool: Brands & Categories ──────────────────────────
+        with tool_tabs[2]:
+            st.markdown("**تعيين الماركات والتصنيفات**")
+            scope_b=st.radio("نطاق العملية",[
+                "الصفوف التي ليس لها ماركة/تصنيف",
+                "كل الصفوف (يُعيد التعيين)",
+            ], horizontal=True, key="scope_b")
 
-        # Processing log
-        if st.session_state.processing_log:
-            with st.expander("📋 سجل المعالجة"):
-                st.dataframe(pd.DataFrame(st.session_state.processing_log), use_container_width=True)
-
-        # Editable grid — show key columns only for usability
-        edit_cols = ["أسم المنتج","الماركة","تصنيف المنتج","سعر المنتج",
-                     "رمز المنتج sku","صورة المنتج","وصف صورة المنتج","حالة المنتج"]
-        edit_cols = [c for c in edit_cols if c in df_w.columns]
-
-        st.markdown("**جدول التعديل التفاعلي** (عدّل أي خلية مباشرةً):")
-        edited_main = st.data_editor(
-            df_w[edit_cols],
-            use_container_width=True,
-            num_rows="dynamic",
-            key="editor_new_main"
-        )
-        # Apply edits back
-        for c in edit_cols:
-            df_w[c] = edited_main[c]
-        st.session_state.working_df = df_w
-
-        # Description editor
-        with st.expander("📝 تعديل الأوصاف"):
-            desc_df = df_w[["أسم المنتج","الوصف"]].copy()
-            edited_desc = st.data_editor(desc_df, use_container_width=True,
-                                         num_rows="fixed", key="editor_desc")
-            df_w["الوصف"] = edited_desc["الوصف"]
-            st.session_state.working_df = df_w
-
-        # SEO editor
-        st.markdown("**جدول SEO:**")
-        seo_df_edit = st.data_editor(
-            st.session_state.results_df,
-            use_container_width=True,
-            num_rows="dynamic",
-            key="editor_seo"
-        )
-        st.session_state.results_df = seo_df_edit
-
-        # ── EXPORT BUTTONS ────────────────────────────────────────────────────
-        st.markdown("---")
-        st.markdown("### الخطوة 3: التصدير")
-        st.caption("اختر صيغة التصدير المناسبة لكل ملف")
-
-        ca, cb, cc, cd = st.columns(4)
-        with ca:
-            xlsx_prod = build_salla_product_xlsx(st.session_state.working_df)
-            st.download_button("📥 منتجات — Excel", xlsx_prod,
-                               "mahwous_products.xlsx",
-                               "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                               use_container_width=True)
-        with cb:
-            csv_prod = build_salla_product_csv(st.session_state.working_df)
-            st.download_button("📥 منتجات — CSV", csv_prod,
-                               "mahwous_products.csv", "text/csv",
-                               use_container_width=True)
-        with cc:
-            xlsx_seo = build_salla_seo_xlsx(st.session_state.results_df)
-            st.download_button("📥 SEO — Excel", xlsx_seo,
-                               "mahwous_seo.xlsx",
-                               "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                               use_container_width=True)
-        with cd:
-            csv_seo = build_salla_seo_csv(st.session_state.results_df)
-            st.download_button("📥 SEO — CSV", csv_seo,
-                               "mahwous_seo.csv", "text/csv",
-                               use_container_width=True)
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# ██████████  MODE: EDIT EXISTING SALLA FILE  ██████████████████████████████████
-# ═══════════════════════════════════════════════════════════════════════════════
-elif st.session_state.mode == "edit":
-    st.markdown("## ✏️ تعديل ملف منتجات سلة الموجود")
-    st.caption("ارفع ملف تحديث/تعديل المنتجات المصدَّر من سلة، عدّله، وصدّره مرة أخرى.")
-
-    uploaded_salla = st.file_uploader(
-        "ارفع ملف منتجات سلة (Excel أو CSV)",
-        type=["csv","xlsx","xls"], key="up_edit"
-    )
-
-    if uploaded_salla:
-        salla_df = read_salla_product_file(uploaded_salla)
-        if not salla_df.empty:
-            st.success(f"✅ تم قراءة **{len(salla_df)} منتج** من ملف سلة")
-
-            # Show all columns present vs. expected
-            present = set(salla_df.columns)
-            expected = set(SALLA_PRODUCT_COLS)
-            missing = expected - present
-            if missing:
-                st.warning(f"أعمدة غير موجودة في الملف (ستُضاف فارغة): {', '.join(list(missing)[:8])}...")
-
-            # Build full df with all Salla columns
-            full_df = pd.DataFrame(columns=SALLA_PRODUCT_COLS)
-            for col in SALLA_PRODUCT_COLS:
-                if col in salla_df.columns:
-                    full_df[col] = salla_df[col]
-                else:
-                    full_df[col] = ""
-
-            st.markdown("### خيارات المعالجة الإضافية")
-            op1, op2, op3 = st.columns(3)
-            with op1:
-                regen_desc = st.checkbox("🤖 توليد وصف AI للصفوف الفارغة")
-            with op2:
-                regen_seo  = st.checkbox("🔍 توليد SEO للصفوف الفارغة")
-            with op3:
-                fetch_imgs = st.checkbox("🖼 جلب صور للصفوف الفارغة")
-
-            if st.button("⚡ تطبيق المعالجة", key="proc_edit") and any([regen_desc, regen_seo, fetch_imgs]):
-                progress = st.progress(0)
-                seo_rows = []
-                for i, (idx, row) in enumerate(full_df.iterrows()):
-                    progress.progress(int((i+1)/len(full_df)*100))
-                    name = str(row.get("أسم المنتج","")).strip()
+            if st.button("🏷 تعيين الآن",type="primary",key="assign_brand_btn"):
+                indices = [i for i,r in df.iterrows()
+                           if not str(r.get("الماركة","")).strip()] if scope_b.startswith("الصفوف") \
+                           else list(range(len(df)))
+                for i in indices:
+                    row=df.iloc[i]
+                    name=str(row.get("أسم المنتج","")).strip()
                     if not name: continue
-                    brand    = match_brand(name)
-                    is_test  = any(w in name.lower() for w in ["تستر","tester"])
-                    gender   = "للنساء" if any(w in name for w in ["نسائ","women"]) else \
-                               "للرجال" if any(w in name for w in ["رجال","men"]) else "للجنسين"
-                    size_m   = re.search(r"\d+\s*مل|\d+\s*ml", name, re.I)
-                    size     = size_m.group() if size_m else "100 مل"
+                    brand=match_brand(name)
+                    cat=match_category(name,str(row.get("وصف صورة المنتج","")))
+                    if brand.get("name"): df.at[i,"الماركة"]=brand["name"]
+                    if not str(row.get("تصنيف المنتج","")).strip(): df.at[i,"تصنيف المنتج"]=cat
+                st.session_state.fm_df=df
+                st.success(f"✅ تم تعيين الماركات والتصنيفات لـ {len(indices)} صف")
+                st.rerun()
 
-                    if fetch_imgs and not str(row.get("صورة المنتج","")).startswith("http"):
-                        full_df.at[idx, "صورة المنتج"] = fetch_image(name, is_test)
+            st.divider()
+            # Manual override for a row
+            st.markdown("**تعديل يدوي لصف محدد:**")
+            b1,b2,b3=st.columns(3)
+            with b1: brow_i=st.number_input("رقم الصف",0,max(0,len(df)-1),0,key="brow_i")
+            brands_list = ["— اختر —"] + (
+                [str(r.iloc[0]) for _,r in st.session_state.brands_df.iterrows()]
+                if st.session_state.brands_df is not None else []
+            )
+            cats_list = ["— اختر —"] + (
+                [str(r.get("التصنيفات","")) for _,r in st.session_state.categories_df.iterrows()]
+                if st.session_state.categories_df is not None else []
+            )
+            with b2: sel_brand=st.selectbox("الماركة",brands_list,key="sel_brand")
+            with b3: sel_cat=st.selectbox("التصنيف",cats_list,key="sel_cat")
+            if st.button("تطبيق على الصف",key="apply_brand"):
+                if sel_brand!="— اختر —": df.at[brow_i,"الماركة"]=sel_brand
+                if sel_cat!="— اختر —":
+                    # Build full category path
+                    cat_df = st.session_state.categories_df
+                    row_c  = cat_df[cat_df["التصنيفات"]==sel_cat].iloc[0] if cat_df is not None and len(cat_df[cat_df["التصنيفات"]==sel_cat])>0 else None
+                    if row_c is not None:
+                        parent = str(row_c.get("التصنيف الاساسي",""))
+                        path   = f"{parent} > {sel_cat}" if parent and parent.strip() else sel_cat
+                    else:
+                        path = sel_cat
+                    df.at[brow_i,"تصنيف المنتج"]=path
+                st.session_state.fm_df=df
+                st.success("✅ تم التطبيق")
+                st.rerun()
 
-                    if regen_desc and not str(row.get("الوصف","")).strip():
-                        full_df.at[idx, "الوصف"] = generate_description(
-                            name, is_test, brand, size, gender, "أو دو بارفيوم"
+        # ── Tool: Add New Product Row ──────────────────────────
+        with tool_tabs[3]:
+            st.markdown("**أضف منتجاً جديداً — أدخل الاسم وسيكمل النظام الباقي**")
+            np1,np2,np3,np4 = st.columns(4)
+            with np1: new_name   = st.text_input("اسم العطر *",placeholder="مثال: ديور سوفاج 100 مل",key="new_name")
+            with np2: new_gender = st.selectbox("الجنس",["للجنسين","للرجال","للنساء"],key="new_gender")
+            with np3: new_size   = st.text_input("الحجم","100 مل",key="new_size")
+            with np4: new_conc   = st.selectbox("التركيز",["أو دو بارفيوم","أو دو كولون","أو دو تواليت"],key="new_conc")
+
+            np5,np6,np7,np8 = st.columns(4)
+            with np5: new_price = st.text_input("السعر",key="new_price")
+            with np6: new_sku   = st.text_input("SKU",key="new_sku")
+            with np7: new_img   = st.text_input("رابط الصورة (اختياري)",key="new_img")
+            with np8: new_type  = st.selectbox("النوع",["عطر عادي","تستر"],key="new_type")
+
+            n_opts = st.columns(3)
+            with n_opts[0]: do_desc  = st.checkbox("🤖 توليد وصف AI",value=True,key="do_desc_new")
+            with n_opts[1]: do_img   = st.checkbox("🖼 جلب صورة تلقائياً",value=False,key="do_img_new")
+            with n_opts[2]: do_seo   = st.checkbox("🔍 توليد SEO",value=True,key="do_seo_new")
+
+            if st.button("➕ إضافة المنتج",type="primary",key="add_product_btn"):
+                if not new_name.strip():
+                    st.error("أدخل اسم العطر")
+                else:
+                    with st.spinner("جاري معالجة المنتج..."):
+                        is_t    = new_type=="تستر"
+                        brand   = match_brand(new_name)
+                        cat     = match_category(new_name,new_gender)
+                        seo     = gen_seo(new_name,brand,new_size,is_t,new_gender)
+                        img_url = new_img or (fetch_image(new_name,is_t) if do_img else "")
+                        desc    = gen_desc(new_name,is_t,brand,new_size,new_gender,new_conc) if do_desc else ""
+
+                        nr = {c:"" for c in SALLA_PRODUCT_COLS}
+                        nr["النوع "]                   = "منتج"
+                        nr["أسم المنتج"]               = new_name
+                        nr["تصنيف المنتج"]             = cat
+                        nr["صورة المنتج"]              = img_url
+                        nr["وصف صورة المنتج"]          = seo["alt"]
+                        nr["نوع المنتج"]               = "منتج جاهز"
+                        nr["سعر المنتج"]               = new_price
+                        nr["الوصف"]                    = desc
+                        nr["هل يتطلب شحن؟"]           = "نعم"
+                        nr["رمز المنتج sku"]           = new_sku
+                        nr["الوزن"]                    = "0.2"
+                        nr["وحدة الوزن"]               = "kg"
+                        nr["حالة المنتج"]              = "مرئي"
+                        nr["الماركة"]                  = brand.get("name","")
+                        nr["خاضع للضريبة ؟"]          = "نعم"
+                        nr["اقصي كمية لكل عميل"]      = "0"
+                        nr["إخفاء خيار تحديد الكمية"] = "0"
+                        nr["اضافة صورة عند الطلب"]    = "0"
+
+                        new_row_df = pd.DataFrame([nr])
+                        st.session_state.fm_df = pd.concat(
+                            [df, new_row_df], ignore_index=True
                         )
-                    if not full_df.at[idx,"الماركة"]:
-                        full_df.at[idx,"الماركة"] = brand.get("name","")
-                    if not full_df.at[idx,"تصنيف المنتج"]:
-                        full_df.at[idx,"تصنيف المنتج"] = match_category(name, gender)
 
-                    seo = generate_seo(name, brand, size, is_test, gender)
-                    seo_rows.append({
-                        "No. (غير قابل للتعديل)":          str(row.get("No.","") or ""),
-                        "اسم المنتج (غير قابل للتعديل)":   name,
-                        "رابط مخصص للمنتج (SEO Page URL)": seo["url"],
-                        "عنوان صفحة المنتج (SEO Page Title)": seo["page_title"],
-                        "وصف صفحة المنتج (SEO Page Description)": seo["page_desc"],
-                    })
+                        # Update SEO df
+                        seo_row = {
+                            "No. (غير قابل للتعديل)": "",
+                            "اسم المنتج (غير قابل للتعديل)": new_name,
+                            "رابط مخصص للمنتج (SEO Page URL)": seo["url"],
+                            "عنوان صفحة المنتج (SEO Page Title)": seo["title"],
+                            "وصف صفحة المنتج (SEO Page Description)": seo["desc"],
+                        }
+                        prev_seo = st.session_state.fm_seo_df or pd.DataFrame(columns=SALLA_SEO_COLS)
+                        st.session_state.fm_seo_df = pd.concat(
+                            [prev_seo, pd.DataFrame([seo_row])], ignore_index=True
+                        )
+                        st.success(f"✅ تمت إضافة: **{new_name}**")
+                        st.rerun()
 
-                progress.progress(100)
-                st.success("✅ تمت المعالجة!")
-                st.session_state.working_df = full_df
+        # ── Tool: Bulk Operations ──────────────────────────────
+        with tool_tabs[4]:
+            st.markdown("**عمليات مجمّعة على كل الصفوف**")
+            b_ops = st.multiselect("اختر العمليات المطلوبة:", [
+                "🏷 تعيين الماركات الفارغة",
+                "📂 تعيين التصنيفات الفارغة",
+                "🔍 توليد SEO للكل",
+                "🔤 توليد Alt Text",
+                "📋 تعيين القيم الثابتة (نوع، شحن، ضريبة)",
+            ], key="bulk_ops")
+
+            if st.button("⚡ تنفيذ العمليات المختارة",type="primary",key="bulk_run"):
+                prog=st.progress(0); stat=st.empty()
+                seo_rows=[]
+                for i,(idx,row) in enumerate(df.iterrows()):
+                    prog.progress(int((i+1)/len(df)*100))
+                    name=str(row.get("أسم المنتج","")).strip()
+                    if not name: continue
+                    brand=match_brand(name)
+                    is_t=any(w in name.lower() for w in ["تستر","tester"])
+                    size_m=re.search(r"\d+\s*مل|\d+\s*ml",name,re.I)
+                    size=size_m.group() if size_m else "100 مل"
+                    gender="للنساء" if any(w in name for w in ["نسائ","women"]) else \
+                           "للرجال" if any(w in name for w in ["رجال","men"]) else "للجنسين"
+                    seo=gen_seo(name,brand,size,is_t,gender)
+                    if "🏷 تعيين الماركات الفارغة" in b_ops and not str(row.get("الماركة","")).strip():
+                        df.at[idx,"الماركة"]=brand.get("name","")
+                    if "📂 تعيين التصنيفات الفارغة" in b_ops and not str(row.get("تصنيف المنتج","")).strip():
+                        df.at[idx,"تصنيف المنتج"]=match_category(name,gender)
+                    if "🔤 توليد Alt Text" in b_ops:
+                        df.at[idx,"وصف صورة المنتج"]=seo["alt"]
+                    if "📋 تعيين القيم الثابتة (نوع، شحن، ضريبة)" in b_ops:
+                        df.at[idx,"النوع "]="منتج"
+                        df.at[idx,"نوع المنتج"]="منتج جاهز"
+                        df.at[idx,"هل يتطلب شحن؟"]="نعم"
+                        df.at[idx,"خاضع للضريبة ؟"]="نعم"
+                    if "🔍 توليد SEO للكل" in b_ops:
+                        seo_rows.append({
+                            "No. (غير قابل للتعديل)":           str(row.get("No.","") or ""),
+                            "اسم المنتج (غير قابل للتعديل)":    name,
+                            "رابط مخصص للمنتج (SEO Page URL)":  seo["url"],
+                            "عنوان صفحة المنتج (SEO Page Title)":seo["title"],
+                            "وصف صفحة المنتج (SEO Page Description)":seo["desc"],
+                        })
+                st.session_state.fm_df=df
                 if seo_rows:
-                    st.session_state.results_df = pd.DataFrame(seo_rows)
-            else:
-                st.session_state.working_df = full_df
+                    st.session_state.fm_seo_df=pd.DataFrame(seo_rows)
+                stat.success("✅ تمت العمليات المجمّعة!")
+                st.rerun()
 
-            # ── Editable grid ──────────────────────────────────────────────
-            st.markdown("### الجدول التفاعلي — عدّل وأضف وامسح")
-            edit_cols_e = ["No.", "أسم المنتج", "الماركة", "تصنيف المنتج",
-                           "سعر المنتج", "رمز المنتج sku", "صورة المنتج",
-                           "وصف صورة المنتج", "حالة المنتج", "السعر المخفض"]
-            edit_cols_e = [c for c in edit_cols_e if c in st.session_state.working_df.columns]
-            edited_e = st.data_editor(
-                st.session_state.working_df[edit_cols_e],
-                use_container_width=True, num_rows="dynamic", key="editor_edit"
+        # ── EDITABLE GRID ──────────────────────────────────────
+        st.markdown("""<hr class="gdiv">
+        <div class="sec-header"><div class="bar"></div><h3>الجدول التفاعلي — عدّل أي خلية مباشرةً</h3></div>
+        """, unsafe_allow_html=True)
+
+        # Column selector
+        all_cols = list(df.columns)
+        show_cols_default = [c for c in EDITOR_DEFAULT_COLS if c in all_cols]
+        show_cols = st.multiselect(
+            "الأعمدة المعروضة في الجدول:",
+            options=all_cols,
+            default=show_cols_default,
+            key="show_cols"
+        )
+
+        if not show_cols:
+            show_cols = show_cols_default or all_cols[:8]
+
+        edited_df = st.data_editor(
+            df[show_cols].fillna(""),
+            use_container_width=True,
+            num_rows="dynamic",
+            height=450,
+            key="main_editor"
+        )
+        # Write edits back to full df
+        for c in show_cols:
+            df[c] = edited_df[c]
+        st.session_state.fm_df = df
+
+        # ── Description editor (separate) ──────────────────────
+        with st.expander("📝 تعديل الأوصاف (HTML) — عرض منتج واحد"):
+            sel_prod = st.selectbox(
+                "اختر المنتج:",
+                options=range(len(df)),
+                format_func=lambda i: str(df.iloc[i].get("أسم المنتج","صف "+str(i))),
+                key="sel_prod_desc"
             )
-            for c in edit_cols_e:
-                st.session_state.working_df[c] = edited_e[c]
+            if sel_prod is not None:
+                cur_desc = str(df.iloc[sel_prod].get("الوصف","") or "")
+                new_desc = st.text_area("الوصف (HTML):", value=cur_desc, height=300, key="prod_desc_area")
+                if st.button("💾 حفظ الوصف",key="save_desc"):
+                    df.at[sel_prod,"الوصف"]=new_desc
+                    st.session_state.fm_df=df
+                    st.success("✅ تم حفظ الوصف")
+                    st.rerun()
 
-            with st.expander("📝 تعديل الأوصاف (HTML)"):
-                desc_e = st.data_editor(
-                    st.session_state.working_df[["أسم المنتج","الوصف"]],
-                    use_container_width=True, key="editor_edit_desc"
+        # SEO table
+        if st.session_state.fm_seo_df is not None:
+            with st.expander("🔍 جدول SEO — قابل للتعديل"):
+                edited_seo = st.data_editor(
+                    st.session_state.fm_seo_df.fillna(""),
+                    use_container_width=True, num_rows="dynamic", key="seo_editor_main"
                 )
-                st.session_state.working_df["الوصف"] = desc_e["الوصف"]
+                st.session_state.fm_seo_df = edited_seo
 
-            # Export
-            st.markdown("### التصدير")
-            c1,c2,c3,c4 = st.columns(4)
-            with c1:
-                st.download_button("📥 منتجات — Excel",
-                    build_salla_product_xlsx(st.session_state.working_df),
-                    "salla_products_updated.xlsx",
-                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    use_container_width=True)
-            with c2:
-                st.download_button("📥 منتجات — CSV",
-                    build_salla_product_csv(st.session_state.working_df),
-                    "salla_products_updated.csv","text/csv",use_container_width=True)
-            with c3:
-                if st.session_state.results_df is not None:
-                    st.download_button("📥 SEO — Excel",
-                        build_salla_seo_xlsx(st.session_state.results_df),
-                        "salla_seo_updated.xlsx",
-                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        use_container_width=True)
-            with c4:
-                if st.session_state.results_df is not None:
-                    st.download_button("📥 SEO — CSV",
-                        build_salla_seo_csv(st.session_state.results_df),
-                        "salla_seo_updated.csv","text/csv",use_container_width=True)
+        # ── EXPORT ─────────────────────────────────────────────
+        st.markdown("""<hr class="gdiv">
+        <div class="sec-header"><div class="bar"></div><h3>التصدير — جاهز للرفع على سلة</h3></div>
+        """, unsafe_allow_html=True)
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# ██████████  MODE: SEO MERGE  ████████████████████████████████████████████████
-# ═══════════════════════════════════════════════════════════════════════════════
-elif st.session_state.mode == "seo_merge":
-    st.markdown("## 🔍 دمج بيانات SEO في ملف المنتجات")
-    st.caption("ارفع ملف منتجات سلة وملف بيانات SEO، وسيتم دمجهما تلقائياً.")
-
-    c1, c2 = st.columns(2)
-    with c1:
-        prod_file = st.file_uploader("📂 ملف منتجات سلة (Excel/CSV)",
-                                     type=["csv","xlsx"], key="seo_prod")
-    with c2:
-        seo_file  = st.file_uploader("📂 ملف بيانات SEO (Excel/CSV)",
-                                     type=["csv","xlsx"], key="seo_seo")
-
-    if prod_file and seo_file:
-        prod_df = read_salla_product_file(prod_file)
-        seo_df  = read_any_file(seo_file)
-
-        if not prod_df.empty and not seo_df.empty:
-            st.success(f"✅ منتجات: {len(prod_df)} صف | SEO: {len(seo_df)} صف")
-
-            with st.expander("👀 معاينة ملف SEO"):
-                st.dataframe(seo_df.head(5), use_container_width=True)
-
-            # Auto-detect SEO columns
-            no_col  = next((c for c in seo_df.columns if "no" in c.lower() or "رقم" in c), seo_df.columns[0])
-            url_col = next((c for c in seo_df.columns if "url" in c.lower() or "رابط" in c), None)
-            title_col = next((c for c in seo_df.columns if "title" in c.lower() or "عنوان" in c), None)
-            desc_col  = next((c for c in seo_df.columns if "desc" in c.lower() or "وصف" in c), None)
-
-            st.markdown("**تأكيد تعيين أعمدة SEO:**")
-            sc1,sc2,sc3,sc4 = st.columns(4)
-            seo_cols_list = list(seo_df.columns)
-            with sc1: no_col_s   = st.selectbox("عمود رقم المنتج", seo_cols_list,
-                                                 index=seo_cols_list.index(no_col) if no_col in seo_cols_list else 0)
-            with sc2: url_col_s  = st.selectbox("عمود الرابط URL",  seo_cols_list,
-                                                 index=seo_cols_list.index(url_col) if url_col in seo_cols_list else 0)
-            with sc3: ttl_col_s  = st.selectbox("عمود العنوان",     seo_cols_list,
-                                                 index=seo_cols_list.index(title_col) if title_col in seo_cols_list else 0)
-            with sc4: dsc_col_s  = st.selectbox("عمود الوصف",       seo_cols_list,
-                                                 index=seo_cols_list.index(desc_col) if desc_col in seo_cols_list else 0)
-
-            what_to_merge = st.multiselect(
-                "ماذا تريد دمجه في ملف المنتجات؟",
-                ["الوصف (HTML)","الماركة","التصنيف","وصف صورة المنتج","حالة المنتج"],
-                default=["الوصف (HTML)"]
+        e1,e2,e3,e4 = st.columns(4)
+        with e1:
+            st.download_button(
+                "📥 ملف المنتجات — Excel",
+                export_product_xlsx(df),
+                "mahwous_products.xlsx",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True, key="exp_prod_xl"
             )
+        with e2:
+            st.download_button(
+                "📥 ملف المنتجات — CSV",
+                export_product_csv(df),
+                "mahwous_products.csv","text/csv",
+                use_container_width=True, key="exp_prod_csv"
+            )
+        with e3:
+            if st.session_state.fm_seo_df is not None:
+                st.download_button(
+                    "📥 ملف SEO — Excel",
+                    export_seo_xlsx(st.session_state.fm_seo_df),
+                    "mahwous_seo.xlsx",
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True, key="exp_seo_xl"
+                )
+            else:
+                st.info("لا يوجد ملف SEO بعد — نفّذ 'توليد SEO للكل' من عمليات مجمّعة")
+        with e4:
+            if st.session_state.fm_seo_df is not None:
+                st.download_button(
+                    "📥 ملف SEO — CSV",
+                    export_seo_csv(st.session_state.fm_seo_df),
+                    "mahwous_seo.csv","text/csv",
+                    use_container_width=True, key="exp_seo_csv"
+                )
 
-            if st.button("⚡ دمج البيانات", type="primary", key="merge_btn"):
-                # Convert No. to string for matching
-                seo_df[no_col_s] = seo_df[no_col_s].astype(str).str.strip()
-                if "No." in prod_df.columns:
-                    prod_df["No."] = prod_df["No."].astype(str).str.strip()
+    elif st.session_state.fm_df is None:
+        st.markdown("""
+        <div class="upload-zone">
+          <div class="upload-icon">📂</div>
+          <div class="upload-title">ارفع ملفك للبدء</div>
+          <div class="upload-sub">يدعم: Excel (.xlsx, .xls) | CSV (UTF-8, Windows-1256)</div>
+          <div class="upload-sub" style="margin-top:8px">
+            ملفات سلة | ملفات الموردين | قوائم الأسماء | أي تنسيق آخر
+          </div>
+        </div>
+        """, unsafe_allow_html=True)
 
-                # Build SEO output df
-                seo_out_rows = []
-                for _, prow in prod_df.iterrows():
-                    no_val = str(prow.get("No.","")).strip()
-                    match  = seo_df[seo_df[no_col_s] == no_val]
-                    srow   = match.iloc[0] if not match.empty else None
+# ══════════════════════════════════════════════════════════════
+# ████  PAGE: NEW PRODUCT QUICK  ██████████████████████████████
+# ══════════════════════════════════════════════════════════════
+elif st.session_state.page == "new":
+    st.markdown("""<div class="sec-header"><div class="bar"></div><h3>أضف منتجاً — أدخل الاسم فقط</h3></div>""",
+                unsafe_allow_html=True)
 
-                    seo_out_rows.append({
-                        "No. (غير قابل للتعديل)":            no_val,
-                        "اسم المنتج (غير قابل للتعديل)":     str(prow.get("أسم المنتج","")),
-                        "رابط مخصص للمنتج (SEO Page URL)":   str(srow[url_col_s]) if srow is not None else "",
-                        "عنوان صفحة المنتج (SEO Page Title)": str(srow[ttl_col_s]) if srow is not None else "",
-                        "وصف صفحة المنتج (SEO Page Description)": str(srow[dsc_col_s]) if srow is not None else "",
+    with st.form("new_product_form", clear_on_submit=True):
+        f1,f2,f3 = st.columns(3)
+        with f1:
+            nm = st.text_input("اسم العطر *", placeholder="مثال: شانيل بلو دو شانيل 100 مل")
+            pr = st.text_input("السعر", placeholder="299")
+        with f2:
+            gn = st.selectbox("الجنس", ["للجنسين","للرجال","للنساء"])
+            sk = st.text_input("SKU", placeholder="SKU-001")
+        with f3:
+            sz = st.text_input("الحجم", "100 مل")
+            cn = st.selectbox("التركيز", ["أو دو بارفيوم","أو دو كولون","أو دو تواليت","بارفيوم"])
+
+        f4,f5,f6 = st.columns(3)
+        with f4: tp = st.selectbox("النوع", ["عطر عادي","تستر"])
+        with f5: im = st.text_input("رابط الصورة (اختياري)")
+        with f6: st.markdown("<br>",unsafe_allow_html=True)
+
+        o1,o2,o3 = st.columns(3)
+        with o1: do_d = st.checkbox("🤖 وصف AI",value=True)
+        with o2: do_i = st.checkbox("🖼 جلب صورة",value=False)
+        with o3: do_s = st.checkbox("🔍 بيانات SEO",value=True)
+
+        submitted = st.form_submit_button("➕ إضافة للقائمة", type="primary", use_container_width=True)
+
+    if submitted and nm.strip():
+        with st.spinner("جاري المعالجة..."):
+            is_t   = tp=="تستر"
+            brand  = match_brand(nm)
+            cat    = match_category(nm,gn)
+            seo    = gen_seo(nm,brand,sz,is_t,gn)
+            img_url= im or (fetch_image(nm,is_t) if do_i else "")
+            desc   = gen_desc(nm,is_t,brand,sz,gn,cn) if do_d else ""
+
+            nr = {c:"" for c in SALLA_PRODUCT_COLS}
+            nr.update({
+                "النوع ":"منتج","أسم المنتج":nm,"تصنيف المنتج":cat,
+                "صورة المنتج":img_url,"وصف صورة المنتج":seo["alt"],
+                "نوع المنتج":"منتج جاهز","سعر المنتج":pr,"الوصف":desc,
+                "هل يتطلب شحن؟":"نعم","رمز المنتج sku":sk,
+                "الوزن":"0.2","وحدة الوزن":"kg","حالة المنتج":"مرئي",
+                "الماركة":brand.get("name",""),"خاضع للضريبة ؟":"نعم",
+                "اقصي كمية لكل عميل":"0",
+                "إخفاء خيار تحديد الكمية":"0","اضافة صورة عند الطلب":"0",
+            })
+            st.session_state.nw_rows.append({
+                "product": nr,
+                "seo": {"url":seo["url"],"title":seo["title"],"desc":seo["desc"]}
+            })
+        st.success(f"✅ أُضيف: **{nm}**")
+
+    # Show pending list
+    if st.session_state.nw_rows:
+        st.markdown(f"### قائمة المنتجات المعلّقة ({len(st.session_state.nw_rows)} منتج)")
+        preview_data = []
+        for r in st.session_state.nw_rows:
+            p = r["product"]
+            preview_data.append({
+                "الاسم": p.get("أسم المنتج",""),
+                "الماركة": p.get("الماركة",""),
+                "التصنيف": p.get("تصنيف المنتج",""),
+                "السعر": p.get("سعر المنتج",""),
+                "وصف ✓": "✅" if p.get("الوصف","").strip() else "—",
+                "صورة ✓": "✅" if p.get("صورة المنتج","").startswith("http") else "—",
+            })
+        st.dataframe(pd.DataFrame(preview_data), use_container_width=True)
+
+        c1,c2,c3,c4,c5 = st.columns(5)
+        prod_df_new = pd.DataFrame([r["product"] for r in st.session_state.nw_rows])
+        seo_df_new  = pd.DataFrame([{
+            "No. (غير قابل للتعديل)":"",
+            "اسم المنتج (غير قابل للتعديل)": r["product"]["أسم المنتج"],
+            "رابط مخصص للمنتج (SEO Page URL)": r["seo"]["url"],
+            "عنوان صفحة المنتج (SEO Page Title)": r["seo"]["title"],
+            "وصف صفحة المنتج (SEO Page Description)": r["seo"]["desc"],
+        } for r in st.session_state.nw_rows])
+
+        with c1:
+            st.download_button("📥 منتجات Excel",export_product_xlsx(prod_df_new),
+                "new_products.xlsx","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True)
+        with c2:
+            st.download_button("📥 منتجات CSV",export_product_csv(prod_df_new),
+                "new_products.csv","text/csv",use_container_width=True)
+        with c3:
+            st.download_button("📥 SEO Excel",export_seo_xlsx(seo_df_new),
+                "new_seo.xlsx","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True)
+        with c4:
+            st.download_button("📥 SEO CSV",export_seo_csv(seo_df_new),
+                "new_seo.csv","text/csv",use_container_width=True)
+        with c5:
+            if st.button("🔀 نقل للمدير",use_container_width=True):
+                existing = st.session_state.fm_df
+                if existing is not None:
+                    st.session_state.fm_df = pd.concat([existing,prod_df_new],ignore_index=True)
+                else:
+                    st.session_state.fm_df = prod_df_new
+                    st.session_state.fm_col_map = {"mapped":True}
+                st.session_state.nw_rows = []
+                st.session_state.page = "manager"
+                st.rerun()
+
+        if st.button("🗑️ مسح القائمة",key="clear_nw"):
+            st.session_state.nw_rows=[]; st.rerun()
+
+# ══════════════════════════════════════════════════════════════
+# ████  PAGE: SEO MERGE  ██████████████████████████████████████
+# ══════════════════════════════════════════════════════════════
+elif st.session_state.page == "seo":
+    st.markdown("""<div class="sec-header"><div class="bar"></div><h3>دمج ملف المنتجات بملف SEO</h3></div>""",
+                unsafe_allow_html=True)
+    c1,c2 = st.columns(2)
+    with c1:
+        prod_f = st.file_uploader("ملف منتجات سلة",type=["csv","xlsx"],key="seo_pf")
+    with c2:
+        seo_f  = st.file_uploader("ملف SEO",type=["csv","xlsx"],key="seo_sf")
+
+    if prod_f and seo_f:
+        pf = read_file(prod_f, salla_format=True)
+        sf = read_file(seo_f)
+        if not pf.empty and not sf.empty:
+            st.success(f"منتجات: {len(pf)} | SEO: {len(sf)}")
+
+            sc = list(sf.columns)
+            s1,s2,s3,s4 = st.columns(4)
+            def gi(kws):
+                for kw in kws:
+                    for c in sc:
+                        if kw.lower() in c.lower(): return sc.index(c)
+                return 0
+            with s1: no_c  = st.selectbox("رقم المنتج",sc,index=gi(["no","رقم"]),key="seo_no")
+            with s2: url_c = st.selectbox("URL",sc,index=gi(["url","رابط"]),key="seo_url")
+            with s3: ttl_c = st.selectbox("العنوان",sc,index=gi(["title","عنوان"]),key="seo_ttl")
+            with s4: dsc_c = st.selectbox("الوصف",sc,index=gi(["desc","وصف"]),key="seo_dsc")
+
+            if st.button("⚡ دمج الآن",type="primary",key="seo_merge_btn"):
+                sf[no_c]=sf[no_c].astype(str).str.strip()
+                if "No." in pf.columns: pf["No."]=pf["No."].astype(str).str.strip()
+                out=[]
+                for _,row in pf.iterrows():
+                    no=str(row.get("No.","")).strip()
+                    m=sf[sf[no_c]==no]
+                    sr=m.iloc[0] if not m.empty else None
+                    out.append({
+                        "No. (غير قابل للتعديل)":no,
+                        "اسم المنتج (غير قابل للتعديل)":str(row.get("أسم المنتج","")),
+                        "رابط مخصص للمنتج (SEO Page URL)":str(sr[url_c]) if sr is not None else "",
+                        "عنوان صفحة المنتج (SEO Page Title)":str(sr[ttl_c]) if sr is not None else "",
+                        "وصف صفحة المنتج (SEO Page Description)":str(sr[dsc_c]) if sr is not None else "",
                     })
+                out_df=pd.DataFrame(out)
+                matched=int((out_df["رابط مخصص للمنتج (SEO Page URL)"]!="").sum())
+                st.success(f"✅ تم الدمج: {matched}/{len(pf)} صف له بيانات SEO")
+                st.dataframe(out_df.head(10),use_container_width=True)
 
-                merged_count = sum(1 for r in seo_out_rows if r["رابط مخصص للمنتج (SEO Page URL)"])
-                st.success(f"✅ تم الدمج: {merged_count}/{len(prod_df)} صف لديه بيانات SEO")
-
-                st.session_state.working_df = prod_df
-                st.session_state.results_df = pd.DataFrame(seo_out_rows)
-
-                # Show preview
-                st.dataframe(pd.DataFrame(seo_out_rows).head(10), use_container_width=True)
-
-                c1,c2,c3,c4 = st.columns(4)
+                edited_seo_m = st.data_editor(out_df,use_container_width=True,
+                                              num_rows="fixed",key="seo_merge_editor")
+                c1,c2,c3,c4=st.columns(4)
                 with c1:
-                    st.download_button("📥 منتجات — Excel",
-                        build_salla_product_xlsx(prod_df),
-                        "salla_products_merged.xlsx",
-                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    st.download_button("📥 منتجات Excel",
+                        export_product_xlsx(ensure_salla_cols(pf)),
+                        "merged_products.xlsx","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                         use_container_width=True)
                 with c2:
-                    st.download_button("📥 منتجات — CSV",
-                        build_salla_product_csv(prod_df),
-                        "salla_products_merged.csv","text/csv",use_container_width=True)
+                    st.download_button("📥 منتجات CSV",
+                        export_product_csv(ensure_salla_cols(pf)),
+                        "merged_products.csv","text/csv",use_container_width=True)
                 with c3:
-                    st.download_button("📥 SEO — Excel",
-                        build_salla_seo_xlsx(pd.DataFrame(seo_out_rows)),
-                        "salla_seo_merged.xlsx",
-                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    st.download_button("📥 SEO Excel",
+                        export_seo_xlsx(edited_seo_m),
+                        "merged_seo.xlsx","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                         use_container_width=True)
                 with c4:
-                    st.download_button("📥 SEO — CSV",
-                        build_salla_seo_csv(pd.DataFrame(seo_out_rows)),
-                        "salla_seo_merged.csv","text/csv",use_container_width=True)
+                    st.download_button("📥 SEO CSV",
+                        export_seo_csv(edited_seo_m),
+                        "merged_seo.csv","text/csv",use_container_width=True)
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# ██████████  MODE: PRICE UPDATE  █████████████████████████████████████████████
-# ═══════════════════════════════════════════════════════════════════════════════
-elif st.session_state.mode == "price":
-    st.markdown("## 💰 تحديث الأسعار")
-    st.caption("ارفع ملف CSV/Excel بالأسعار الجديدة، عيّن الأعمدة، وصدّر ملف تحديث سلة.")
+# ══════════════════════════════════════════════════════════════
+# ████  PAGE: PRICE UPDATE  ███████████████████████████████████
+# ══════════════════════════════════════════════════════════════
+elif st.session_state.page == "price":
+    st.markdown("""<div class="sec-header"><div class="bar"></div><h3>تحديث الأسعار</h3></div>""",
+                unsafe_allow_html=True)
 
-    uploaded_price = st.file_uploader(
-        "ارفع ملف الأسعار (CSV/Excel — من أي مصدر)",
-        type=["csv","xlsx","xls"], key="up_price"
-    )
-
-    if uploaded_price:
-        raw_p = read_any_file(uploaded_price)
-        if not raw_p.empty:
-            st.success(f"✅ تم قراءة **{len(raw_p)} صف**")
-            with st.expander("👀 معاينة"): st.dataframe(raw_p.head(8), use_container_width=True)
-
-            pcols = ["— اختر —"] + list(raw_p.columns)
+    price_file = st.file_uploader("ارفع ملف الأسعار",type=["csv","xlsx"],key="pr_file")
+    if price_file:
+        pdf = read_file(price_file)
+        if not pdf.empty:
+            st.success(f"✅ {len(pdf)} صف")
+            with st.expander("معاينة"): st.dataframe(pdf.head(6),use_container_width=True)
+            pc = ["— لا يوجد —"]+list(pdf.columns)
+            def bi(kws):
+                for kw in kws:
+                    for c in pdf.columns:
+                        if kw.lower() in c.lower(): return pc.index(c)
+                return 0
             p1,p2,p3,p4,p5 = st.columns(5)
-            with p1: no_c   = st.selectbox("رقم المنتج No.", pcols, key="pno")
-            with p2: nm_c   = st.selectbox("اسم المنتج",    pcols, key="pnm")
-            with p3: pr_c   = st.selectbox("السعر *",       pcols, key="ppr")
-            with p4: sk_c   = st.selectbox("SKU",           pcols, key="psk")
-            with p5: dc_c   = st.selectbox("السعر المخفض",  pcols, key="pdc")
+            with p1: no_c =st.selectbox("No.",pc,index=bi(["no","رقم","id"]),key="pr_no")
+            with p2: nm_c =st.selectbox("الاسم",pc,index=bi(["اسم","name"]),key="pr_nm")
+            with p3: pr_c =st.selectbox("السعر *",pc,index=bi(["سعر","price"]),key="pr_pr")
+            with p4: sk_c =st.selectbox("SKU",pc,index=bi(["sku","رمز"]),key="pr_sk")
+            with p5: dc_c =st.selectbox("المخفض",pc,index=bi(["مخفض","discount","sale"]),key="pr_dc")
 
-            if st.button("⚡ بناء ملف تحديث الأسعار", type="primary", key="price_build"):
-                price_rows = []
-                for _, row in raw_p.iterrows():
-                    price_rows.append({
-                        "No.":                   str(row.get(no_c,"")) if no_c != "— اختر —" else "",
-                        "النوع ":                "منتج",
-                        "أسم المنتج":            str(row.get(nm_c,"")) if nm_c != "— اختر —" else "",
-                        "رمز المنتج sku":        str(row.get(sk_c,"")) if sk_c != "— اختر —" else "",
-                        "سعر المنتج":            str(row.get(pr_c,"")) if pr_c != "— اختر —" else "",
-                        "سعر التكلفة":           "",
-                        "السعر المخفض":          str(row.get(dc_c,"")) if dc_c != "— اختر —" else "",
-                        "تاريخ بداية التخفيض":   "",
-                        "تاريخ نهاية التخفيض":   "",
+            if st.button("⚡ بناء ملف التحديث",type="primary",key="price_build"):
+                rows=[]
+                for _,row in pdf.iterrows():
+                    def gv(c): return str(row.get(c,"") if c!="— لا يوجد —" and c in pdf.columns else "")
+                    rows.append({
+                        "No.":gv(no_c),"النوع ":"منتج","أسم المنتج":gv(nm_c),
+                        "رمز المنتج sku":gv(sk_c),"سعر المنتج":gv(pr_c),
+                        "سعر التكلفة":"","السعر المخفض":gv(dc_c),
+                        "تاريخ بداية التخفيض":"","تاريخ نهاية التخفيض":"",
                     })
-
-                price_df = pd.DataFrame(price_rows)
-                st.markdown("### مراجعة وتعديل")
-                edited_pr = st.data_editor(price_df, use_container_width=True,
-                                           num_rows="dynamic", key="editor_price")
-
-                # Build XLSX
+                price_df=pd.DataFrame(rows)
+                edited_pr=st.data_editor(price_df,use_container_width=True,
+                                         num_rows="dynamic",key="pr_editor")
                 def price_xlsx(df):
-                    wb = Workbook(); ws = wb.active; ws.title = "Price Update"
+                    wb=Workbook(); ws=wb.active; ws.title="Price Update"
                     ws.cell(1,1,"بيانات المنتج")
                     ws.merge_cells(start_row=1,start_column=1,end_row=1,end_column=len(SALLA_PRICE_COLS))
-                    ws.cell(1,1).font = Font(bold=True,color="FFFFFF")
-                    ws.cell(1,1).fill = PatternFill("solid",fgColor="0F0E0D")
-                    ws.cell(1,1).alignment = Alignment(horizontal="center")
+                    ws.cell(1,1).font=Font(bold=True,color="FFFFFF")
+                    ws.cell(1,1).fill=PatternFill("solid",fgColor="0F0E0D")
+                    ws.cell(1,1).alignment=Alignment(horizontal="center")
                     for i,c in enumerate(SALLA_PRICE_COLS,1):
-                        cell = ws.cell(2,i,c)
-                        cell.font = Font(bold=True)
-                        cell.fill = PatternFill("solid",fgColor="E8D5B7")
-                        cell.alignment = Alignment(horizontal="center",wrap_text=True)
-                    for ri,(_, row) in enumerate(df.iterrows(),3):
-                        for ci,col in enumerate(SALLA_PRICE_COLS,1):
-                            ws.cell(ri,ci,str(row.get(col,"") or ""))
-                    buf=io.BytesIO(); wb.save(buf); buf.seek(0); return buf.read()
+                        cell=ws.cell(2,i,c); cell.font=Font(bold=True)
+                        cell.fill=PatternFill("solid",fgColor="E8D5B7")
+                        cell.alignment=Alignment(horizontal="center",wrap_text=True)
+                    for ri,(_,row) in enumerate(df.iterrows(),3):
+                        for ci,c in enumerate(SALLA_PRICE_COLS,1):
+                            ws.cell(ri,ci,str(row.get(c,"") or ""))
+                    b=io.BytesIO(); wb.save(b); b.seek(0); return b.read()
 
-                c1,c2 = st.columns(2)
+                c1,c2=st.columns(2)
                 with c1:
-                    st.download_button("📥 تحديث الأسعار — Excel",
-                        price_xlsx(edited_pr), "price_update.xlsx",
+                    st.download_button("📥 تحديث الأسعار Excel",
+                        price_xlsx(edited_pr),"price_update.xlsx",
                         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                         use_container_width=True)
                 with c2:
-                    csv_p = io.StringIO()
-                    csv_p.write("بيانات المنتج"+"," * (len(SALLA_PRICE_COLS)-1)+"\n")
-                    csv_p.write(",".join(SALLA_PRICE_COLS)+"\n")
+                    out=io.StringIO()
+                    out.write("بيانات المنتج"+","*(len(SALLA_PRICE_COLS)-1)+"\n")
+                    out.write(",".join(SALLA_PRICE_COLS)+"\n")
                     for _,row in edited_pr.iterrows():
-                        csv_p.write(",".join([f'"{str(row.get(c,""))}"' for c in SALLA_PRICE_COLS])+"\n")
-                    st.download_button("📥 تحديث الأسعار — CSV",
-                        csv_p.getvalue().encode("utf-8-sig"),
+                        out.write(",".join([f'"{str(row.get(c,""))}"' for c in SALLA_PRICE_COLS])+"\n")
+                    st.download_button("📥 تحديث الأسعار CSV",
+                        out.getvalue().encode("utf-8-sig"),
                         "price_update.csv","text/csv",use_container_width=True)
 
-# ═══════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════
+# ████  PAGE: SETTINGS  ███████████████████████████████████████
+# ══════════════════════════════════════════════════════════════
+elif st.session_state.page == "settings":
+    st.markdown("""<div class="sec-header"><div class="bar"></div><h3>الإعدادات</h3></div>""",
+                unsafe_allow_html=True)
+
+    tab1,tab2,tab3 = st.tabs(["🔑 مفاتيح API","📚 قواعد البيانات","ℹ️ معلومات"])
+
+    with tab1:
+        st.markdown("#### Anthropic Claude API")
+        ak = st.text_input("ANTHROPIC_API_KEY", value=st.session_state.api_key,
+                           type="password", key="set_ak",
+                           help="احصل عليه من console.anthropic.com")
+        if ak != st.session_state.api_key:
+            st.session_state.api_key = ak
+            st.success("✅ تم حفظ مفتاح Claude")
+
+        st.markdown("#### Google Custom Search API (اختياري — لجلب الصور)")
+        gk = st.text_input("GOOGLE_API_KEY", value=st.session_state.google_api,
+                           type="password", key="set_gk",
+                           help="console.cloud.google.com → APIs → Custom Search API")
+        gc = st.text_input("GOOGLE_CSE_ID", value=st.session_state.google_cse,
+                           key="set_gc",
+                           help="programmablesearchengine.google.com → Search Engine ID")
+        if gk != st.session_state.google_api or gc != st.session_state.google_cse:
+            st.session_state.google_api = gk
+            st.session_state.google_cse = gc
+            st.success("✅ تم حفظ مفاتيح Google")
+
+        st.markdown("""
+        <div class="alert-info" style="margin-top:12px">
+          على Railway: أضف هذه المفاتيح في <b>Variables</b> وليس هنا مباشرة.
+          المفاتيح المُدخلة هنا تُحفظ في الجلسة الحالية فقط.
+        </div>
+        """, unsafe_allow_html=True)
+
+    with tab2:
+        st.markdown("#### الماركات")
+        b_status = f"محملة: **{len(st.session_state.brands_df)} ماركة**" if st.session_state.brands_df is not None else "غير محملة"
+        st.info(b_status)
+        bf=st.file_uploader("تحديث ملف الماركات (CSV/Excel)",type=["csv","xlsx"],key="set_bf")
+        if bf:
+            st.session_state.brands_df=read_file(bf)
+            st.success(f"✅ تم تحميل {len(st.session_state.brands_df)} ماركة")
+        if st.session_state.brands_df is not None:
+            with st.expander("معاينة الماركات"): st.dataframe(st.session_state.brands_df.head(10),use_container_width=True)
+
+        st.markdown("#### التصنيفات")
+        c_status = f"محملة: **{len(st.session_state.categories_df)} تصنيف**" if st.session_state.categories_df is not None else "غير محملة"
+        st.info(c_status)
+        cf=st.file_uploader("تحديث ملف التصنيفات (CSV/Excel)",type=["csv","xlsx"],key="set_cf")
+        if cf:
+            st.session_state.categories_df=read_file(cf)
+            st.success(f"✅ تم تحميل {len(st.session_state.categories_df)} تصنيف")
+        if st.session_state.categories_df is not None:
+            with st.expander("معاينة التصنيفات"): st.dataframe(st.session_state.categories_df.head(10),use_container_width=True)
+
+    with tab3:
+        st.markdown("""
+        ### مهووس — نظام إدارة المنتجات الذكي v3.0
+
+        | الميزة | التفاصيل |
+        |--------|---------|
+        | 📁 مدير الملفات | ارفع أي ملف (Excel/CSV)، عيّن الأعمدة، عدّل، أكمل بـ AI |
+        | 🤖 Claude AI | وصف HTML احترافي 1200-1500 كلمة، SEO محسّن |
+        | 🖼 Google CSE | جلب صور تلقائي عبر Custom Search |
+        | 🏷 مطابقة ذكية | 521 ماركة + 88 تصنيف تلقائياً |
+        | 📊 تصدير مزدوج | Excel + CSV متوافق 100% مع سلة |
+        | ✏️ جدول تفاعلي | تعديل أي خلية + إضافة/حذف صفوف |
+
+        **تنسيقات الملفات المدعومة:**
+        - `.xlsx`, `.xlsm` (Excel 2007+)
+        - `.xls` (Excel 97-2003)
+        - `.csv` (UTF-8, UTF-8-BOM, Windows-1256)
+        """)
+
+# ══════════════════════════════════════════════════════════════
 # FOOTER
-# ═══════════════════════════════════════════════════════════════════════════════
-st.markdown('<hr class="gold-divider">', unsafe_allow_html=True)
-st.markdown(
-    "<div style='text-align:center;color:#9a8e86;font-size:0.8rem'>"
-    "🌸 مهووس — عالمك العطري يبدأ من مهووس | Mahwous Automation System v2.0"
-    "</div>",
-    unsafe_allow_html=True
-)
+# ══════════════════════════════════════════════════════════════
+st.markdown("""<hr class="gdiv">
+<div style="text-align:center;color:#9a8e86;font-size:0.78rem;padding-bottom:1rem">
+  🌸 مهووس — عالمك العطري يبدأ من مهووس | v3.0 | Streamlit on Railway
+</div>""", unsafe_allow_html=True)
