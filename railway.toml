@@ -2,10 +2,7 @@
 builder = "DOCKERFILE"
 
 [deploy]
-startCommand = "streamlit run app.py --server.port=8080 --server.address=0.0.0.0 --server.headless=true --browser.gatherUsageStats=false"
+startCommand = "streamlit run app.py --server.port=$PORT --server.address=0.0.0.0 --server.headless=true --browser.gatherUsageStats=false"
+healthcheckPath = "/_stcore/health"
+healthcheckTimeout = 60
 restartPolicyType = "ON_FAILURE"
-numReplicas = 1
-
-[service]
-# This tells Railway to route traffic to port 8080
-tcpProxyPort = 8080
