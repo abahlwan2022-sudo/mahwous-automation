@@ -492,6 +492,10 @@ def export_salla_xlsx(rows: list) -> bytes:
     return buf.read()
 
 # ─── ROUTES ────────────────────────────────────────────────────────────────────
+@app.route("/health")
+def health():
+    return "OK", 200
+
 @app.route("/")
 def index():
     return render_template_string(open(
