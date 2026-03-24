@@ -379,8 +379,17 @@ def _init_state():
         # Store Audit page state
         "audit_df":       None,   # ملف المتجر للتدقيق
         "audit_results":  None,   # نتائج التدقيق
+        # Auto Pipeline state
+        "pipe_store_df":   None,
+        "pipe_comp_dfs":   [],
+        "pipe_results":    None,
+        "pipe_approved":   None,
+        "pipe_new_brands": [],
+        "pipe_seo_df":     None,
+        "pipe_step":       0,
+        "pipe_running":    False,
         # Page
-        "page":           "compare_v2",
+        "page":           "pipeline",
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -933,6 +942,91 @@ def run_smart_comparison(new_df: pd.DataFrame, store_df: pd.DataFrame,
         })
 
     return pd.DataFrame(results) if results else pd.DataFrame()
+
+
+
+def ai_filter_suspects(suspects_df: pd.DataFrame, store_names: list,
+                        api_key: str, store_df: pd.DataFrame) -> tuple:
+    """
+    فلتر AI للمنتجات المشبوهة.
+    يُرجع (approved_df, rejected_df)
+    approved_df  = مشبوهة تبيّن أنها جديدة فعلاً
+    rejected_df  = مشبوهة تبيّن أنها مكررة أو يجب استبعادها
+    """
+    if suspects_df.empty:
+        return pd.DataFrame(), suspects_df
+
+    if not api_key or not HAS_ANTHROPIC:
+        # بدون AI: استبعد الكل
+        return pd.DataFrame(), suspects_df
+
+    try:
+        client = anthropic.Anthropic(api_key=api_key)
+        # بناء قائمة الأسماء للتحقق (حتى 80 اسم للحفاظ على التكلفة)
+        store_sample = store_names[:120]
+        store_list_str = "\n".join(f"- {n}" for n in store_sample)
+
+        suspects_list = []
+        for i, (_, row) in enumerate(suspects_df.iterrows()):
+            suspects_list.append({
+                "idx": i,
+                "name": str(row.get("الاسم الجديد", "")),
+                "score": float(row.get("نسبة التشابه", 0)),
+                "matched": str(row.get("أقرب تطابق في المتجر", "")),
+                "reason": str(row.get("سبب القرار", "")),
+            })
+
+        suspects_json = json.dumps(suspects_list, ensure_ascii=False)
+
+        prompt = f"""أنت محلل بيانات عطور خبير لمتجر مهووس.
+
+لديك قائمة منتجات "مشبوهة" (نسبة تشابهها مع متجرنا بين 55-88%) يجب أن تقرر لكل منها: هل هي جديدة فعلاً أم مكررة؟
+
+**قائمة منتجاتنا الموجودة (عينة):**
+{store_list_str}
+
+**المنتجات المشبوهة للفحص:**
+{suspects_json}
+
+**قواعد القرار الصارمة:**
+1. إذا كان المنتج نفس الاسم تقريباً (اختلاف طفيف في الكتابة فقط) → مكرر
+2. إذا كان نفس العطر لكن حجم مختلف (مثل 100مل vs 150مل) → جديد (لأنه حجم مختلف)
+3. إذا كان نفس العطر لكن تستر vs عادي → جديد (نوع مختلف)
+4. إذا كان اسم مختلف كلياً رغم النسبة العالية → جديد
+
+أجب بـ JSON فقط (بدون أي نص):
+{{"decisions": [{{"idx": 0, "decision": "جديد", "reason": "..."}} , ...]}}"""
+
+        msg = client.messages.create(
+            model="claude-haiku-4-5",
+            max_tokens=2000,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        raw = msg.content[0].text.strip()
+        m = re.search(r'\{.*\}', raw, re.DOTALL)
+        if not m:
+            return pd.DataFrame(), suspects_df
+
+        data = json.loads(m.group())
+        decisions = {d["idx"]: d["decision"] for d in data.get("decisions", [])}
+
+        approved_rows = []
+        rejected_rows = []
+        for i, (orig_idx, row) in enumerate(suspects_df.iterrows()):
+            dec = decisions.get(i, "مكرر")
+            if dec == "جديد":
+                approved_rows.append(row)
+            else:
+                rejected_rows.append(row)
+
+        approved  = pd.DataFrame(approved_rows) if approved_rows else pd.DataFrame()
+        rejected  = pd.DataFrame(rejected_rows) if rejected_rows else pd.DataFrame()
+        return approved, rejected
+
+    except Exception as e:
+        # عند أي خطأ: استبعد الكل بأمان
+        return pd.DataFrame(), suspects_df
+
 
 
 
@@ -1532,6 +1626,7 @@ with st.sidebar:
     st.divider()
 
     PAGES = [
+        ("🚀", "المسار الآلي",           "pipeline"),
         ("🔎", "مقارنة المنافسين",       "compare_v2"),
         ("🛠️", "المُعالج الشامل",       "processor"),
         ("🔀", "المقارنة والتدقيق",     "compare"),
@@ -1598,6 +1693,7 @@ with st.sidebar:
 # ║  PAGE HEADER                                                    ║
 # ╚══════════════════════════════════════════════════════════════════╝
 TITLES = {
+    "pipeline":    ("🚀 المسار الآلي",            "مقارنة → فلترة AI → معالجة → تصدير — كل شيء بضغطة زر واحدة"),
     "compare_v2":  ("🔎 مقارنة المنافسين",      "ارفع ملف متجرنا + ملفات المنافسين — استخرج الفرص الجديدة بخوارزمية v9.4"),
     "processor":   ("🛠️ المُعالج الشامل",       "ارفع ملف منتجات خام — أكمل الوزن، الحجم، الماركة، الوصف، والقسم — صدّر لسلة"),
     "compare":     ("🔀 المقارنة والتدقيق",     "قارن المنتجات الجديدة بالمتجر — استبعد المكرر — اعتمد أو ألغِ المشبوه"),
@@ -1613,6 +1709,413 @@ st.markdown(f"""
   <div><h1>{ttl}</h1><p>{sub}</p></div>
 </div>
 """, unsafe_allow_html=True)
+
+# ╔══════════════════════════════════════════════════════════════════╗
+# ║  PAGE 1 — AUTO PIPELINE (المسار الآلي)                         ║
+# ╚══════════════════════════════════════════════════════════════════╝
+if st.session_state.page == "pipeline":
+
+    # ── وصف الصفحة ──────────────────────────────────────────────────
+    st.markdown("""<div class="al-info">
+    <b>المسار الآلي الكامل:</b> ارفع ملف المتجر وملفات المنافسين ← ضغطة زر واحدة ←
+    المحرك الذكي v10.4 يقارن ويصفي ← AI يراجع المشبوه ← الوصف والـ SEO يتولدان تلقائياً
+    ← ملف سلة جاهز للرفع + ماركات جديدة جاهزة.
+    </div>""", unsafe_allow_html=True)
+
+    # ── STEP INDICATOR ───────────────────────────────────────────────
+    step = st.session_state.pipe_step
+    steps_html = "".join([
+        f'<div style="display:inline-flex;align-items:center;gap:6px;margin-left:14px">'
+        f'<div style="width:28px;height:28px;border-radius:50%;background:'
+        f'{"#b8933a" if step>=i else "rgba(184,147,58,0.2)"};'
+        f'color:{"#0f0e0d" if step>=i else "#9a8e80"};display:flex;align-items:center;justify-content:center;'
+        f'font-size:0.8rem;font-weight:900">{i}</div>'
+        f'<span style="font-size:0.78rem;color:{"#b8933a" if step>=i else "#9a8e80"};font-weight:{"800" if step==i else "400"}">{lbl}</span>'
+        f'</div>'
+        for i, lbl in enumerate(
+            ["رفع الملفات","مقارنة","فلترة AI","معالجة","التصدير"], 1)
+    ])
+    st.markdown(
+        f'<div style="background:white;border:1px solid rgba(184,147,58,0.2);'
+        f'border-radius:12px;padding:14px 20px;margin-bottom:16px;display:flex;'
+        f'align-items:center;gap:4px;flex-wrap:wrap;">{steps_html}</div>',
+        unsafe_allow_html=True)
+
+    # ════════════════════════════════════════════════════════════════
+    # STEP 1 — رفع الملفات
+    # ════════════════════════════════════════════════════════════════
+    st.markdown("""<div class="sec-title"><div class="bar"></div><h3>رفع الملفات</h3></div>""",
+                unsafe_allow_html=True)
+    pc1, pc2 = st.columns(2)
+    with pc1:
+        st.markdown("**ملف متجرنا (مهووس)** — ملف سلة كامل")
+        if st.session_state.pipe_store_df is not None:
+            st.markdown(f'<div class="al-ok">محمّل: {len(st.session_state.pipe_store_df):,} منتج</div>',
+                        unsafe_allow_html=True)
+        up_ps = st.file_uploader("ارفع ملف المتجر", type=["csv","xlsx","xls"],
+                                  key="pipe_store_up", label_visibility="collapsed")
+        if up_ps:
+            df_ps = read_file(up_ps, salla_2row=True)
+            if df_ps.empty:
+                df_ps = read_file(up_ps, salla_2row=False)
+            if not df_ps.empty:
+                st.session_state.pipe_store_df = df_ps
+                st.session_state.pipe_step = max(st.session_state.pipe_step, 1)
+                st.success(f"✅ {len(df_ps):,} منتج في المتجر")
+
+    with pc2:
+        st.markdown("**ملفات المنافسين** — يمكن رفع أكثر من ملف")
+        if st.session_state.pipe_comp_dfs:
+            tot = sum(len(d) for d in st.session_state.pipe_comp_dfs)
+            st.markdown(f'<div class="al-ok">محمّل: {tot:,} منتج من {len(st.session_state.pipe_comp_dfs)} ملف</div>',
+                        unsafe_allow_html=True)
+        up_pc = st.file_uploader("ارفع ملفات المنافسين", type=["csv","xlsx","xls"],
+                                  key="pipe_comp_up", accept_multiple_files=True,
+                                  label_visibility="collapsed")
+        if up_pc:
+            new_dfs = []
+            for f in up_pc:
+                df_c = read_file(f)
+                if not df_c.empty:
+                    df_c["_source"] = f.name
+                    new_dfs.append(df_c)
+            if new_dfs:
+                st.session_state.pipe_comp_dfs = new_dfs
+                tot2 = sum(len(d) for d in new_dfs)
+                st.session_state.pipe_step = max(st.session_state.pipe_step, 1)
+                st.success(f"✅ {tot2:,} منتج من {len(new_dfs)} ملف")
+
+    # ── إعدادات المحرك (خفية بشكل افتراضي) ──────────────────────────
+    with st.expander("⚙️ إعدادات خوارزمية المقارنة (اختياري — القيم الافتراضية مثالية)", expanded=False):
+        pe1, pe2, pe3 = st.columns(3)
+        with pe1:
+            pipe_t_dup  = st.slider("عتبة المكرر (%)", 80, 99, 98, key="pipe_tdup")
+        with pe2:
+            pipe_t_near = st.slider("عتبة المراجعة (%)", 40, 85, 70, key="pipe_tnear")
+        with pe3:
+            pipe_suspect_pct = st.slider("نسبة الاختلاف المشبوه (%) للأسعار", 10, 50, 20, key="pipe_suspect")
+    pipe_t_dup       = st.session_state.get("pipe_tdup", 98)
+    pipe_t_near      = st.session_state.get("pipe_tnear", 70)
+    pipe_suspect_pct = st.session_state.get("pipe_suspect", 20)
+
+    # ════════════════════════════════════════════════════════════════
+    # MAIN ACTION BUTTON — بدء المسار الآلي
+    # ════════════════════════════════════════════════════════════════
+    has_store_p = st.session_state.pipe_store_df is not None
+    has_comp_p  = bool(st.session_state.pipe_comp_dfs)
+
+    if not (has_store_p and has_comp_p):
+        st.markdown("""<div class="upload-zone"><div class="uz-icon">🚀</div>
+        <div class="uz-title">ارفع ملف المتجر وملفات المنافسين لتفعيل المسار</div>
+        <div class="uz-sub">بعد الرفع، اضغط "بدء المسار الآلي" — كل شيء يعمل تلقائياً</div>
+        </div>""", unsafe_allow_html=True)
+    else:
+        aok_pipe = bool(st.session_state.api_key)
+        if not aok_pipe:
+            st.markdown('<div class="al-warn">⚠️ لم يُضبط مفتاح Claude API — المسار سيعمل بدون AI (المشبوه يُستبعد كله، الأوصاف تبقى فارغة)</div>',
+                        unsafe_allow_html=True)
+
+        if st.button("🚀 بدء المسار الآلي الكامل", type="primary",
+                     key="pipe_run", use_container_width=True):
+            st.session_state.pipe_results    = None
+            st.session_state.pipe_approved   = None
+            st.session_state.pipe_new_brands = []
+            st.session_state.pipe_seo_df     = None
+            st.session_state.pipe_running    = True
+            st.session_state.pipe_step       = 2
+
+            store_df_p  = st.session_state.pipe_store_df
+            comp_merged = pd.concat(st.session_state.pipe_comp_dfs, ignore_index=True)
+
+            # ── تحديد أعمدة الاسم تلقائياً ────────────────────────
+            store_nm = ("أسم المنتج" if "أسم المنتج" in store_df_p.columns
+                        else auto_guess_col(store_df_p.columns,
+                                            ["أسم المنتج","اسم","name","منتج"]))
+            store_sk = auto_guess_col(store_df_p.columns, ["sku","رمز","barcode"])
+            store_br = auto_guess_col(store_df_p.columns, ["ماركة","brand"])
+            comp_nm  = (auto_guess_col(comp_merged.columns,
+                                        ["أسم المنتج","اسم","name","منتج"]) or comp_merged.columns[0])
+            comp_img = auto_guess_col(comp_merged.columns, ["صورة","image","src","img"])
+            comp_pr  = auto_guess_col(comp_merged.columns, ["سعر","price"])
+            NONE_P   = "— لا يوجد —"
+            store_sk  = store_sk if store_sk != NONE_P else None
+            store_br  = store_br if store_br != NONE_P else None
+            comp_img  = comp_img if comp_img != NONE_P else None
+            comp_pr   = comp_pr  if comp_pr  != NONE_P else None
+
+            # استخراج قائمة الماركات
+            brands_p = []
+            bdf_p = st.session_state.brands_df
+            if bdf_p is not None:
+                col0_p = bdf_p.columns[0]
+                brands_p = bdf_p[col0_p].dropna().astype(str).str.strip().tolist()
+
+            # ══ STEP 2: المقارنة ══════════════════════════════════
+            status_ph = st.empty()
+            status_ph.markdown('<div class="prog-run">⚙️ الخطوة 2: تشغيل محرك المقارنة v10.4...</div>',
+                               unsafe_allow_html=True)
+            prog_bar = st.progress(10)
+
+            results_p = run_smart_comparison(
+                new_df=comp_merged, store_df=store_df_p,
+                new_name_col=comp_nm, store_name_col=store_nm,
+                new_sku_col=None,
+                store_sku_col=store_sk,
+                new_img_col=comp_img,
+                t_dup=pipe_t_dup, t_near=pipe_t_near,
+                t_review=40, brands_list=brands_p,
+                store_brand_col=store_br,
+            )
+
+            # إضافة عمود السعر
+            if comp_pr and comp_pr in comp_merged.columns:
+                price_map = {i: str(comp_merged.iloc[i].get(comp_pr, ""))
+                             for i in range(len(comp_merged))}
+                results_p["سعر المنافس"] = results_p["_idx"].map(
+                    lambda x: price_map.get(x, ""))
+
+            st.session_state.pipe_results = results_p
+            prog_bar.progress(30)
+
+            # تصنيف النتائج
+            new_confirmed   = results_p[results_p["الحالة"] == "جديد"].copy()
+            suspects_p      = results_p[results_p["الحالة"] == "مشبوه"].copy()
+
+            # ══ STEP 3: الفلترة النهائية الذكية ══════════════════
+            st.session_state.pipe_step = 3
+            status_ph.markdown(
+                f'<div class="prog-run">🤖 الخطوة 3: فلترة {len(suspects_p)} منتج مشبوه بالذكاء الاصطناعي...</div>',
+                unsafe_allow_html=True)
+            prog_bar.progress(40)
+
+            store_names_p = [str(r.get(store_nm, "")) for _, r in store_df_p.iterrows()]
+
+            if aok_pipe and not suspects_p.empty:
+                ai_approved, ai_rejected = ai_filter_suspects(
+                    suspects_p, store_names_p,
+                    st.session_state.api_key, store_df_p)
+            else:
+                # بدون AI: استبعد الكل
+                ai_approved = pd.DataFrame()
+                ai_rejected = suspects_p
+
+            # دمج المؤكد + ما اعتمده AI
+            frames = [new_confirmed]
+            if not ai_approved.empty:
+                frames.append(ai_approved)
+            approved_all = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+            prog_bar.progress(55)
+
+            # ══ STEP 4: المُعالج التلقائي ════════════════════════
+            st.session_state.pipe_step = 4
+            status_ph.markdown(
+                f'<div class="prog-run">🛠️ الخطوة 4: معالجة {len(approved_all)} منتج معتمد (ماركات، SEO، وصف)...</div>',
+                unsafe_allow_html=True)
+
+            final_rows = []
+            seo_rows   = []
+            new_brands_found = []
+            known_brand_names = set(b.get("اسم الماركة","").lower()
+                                    for b in st.session_state.new_brands)
+
+            for pi_idx, (_, prow) in enumerate(approved_all.iterrows()):
+                prog_bar.progress(55 + int(pi_idx / max(len(approved_all), 1) * 35))
+
+                pname = str(prow.get("الاسم الجديد", ""))
+                if not pname.strip():
+                    continue
+
+                orig_idx = prow.get("_idx", 0)
+                pimg = prow.get("_img", "")
+                if not pimg and comp_img and comp_img in comp_merged.columns:
+                    try:
+                        pimg = str(comp_merged.iloc[int(orig_idx)].get(comp_img, "") or "")
+                    except Exception:
+                        pimg = ""
+                pprice = prow.get("سعر المنافس", "")
+
+                # استخراج الصفات
+                attrs  = extract_product_attrs(pname)
+                size   = attrs.get("size") or "100 مل"
+                conc   = attrs.get("concentration") or "EDP"
+                is_t   = "تستر" in attrs.get("type", "")
+                gender_kw = "للجنسين"
+                nl = pname.lower()
+                if any(w in nl for w in ["رجال","للرجال","men","homme"]): gender_kw = "للرجال"
+                elif any(w in nl for w in ["نساء","للنساء","women","femme"]): gender_kw = "للنساء"
+
+                # ربط الماركة
+                brand_d = match_brand(pname)
+                prow_brand = str(prow.get("الماركة","") or "")
+                if not brand_d.get("name") and prow_brand:
+                    brand_d = {"name": prow_brand, "page_url": ""}
+
+                # توليد ماركة جديدة إذا لزم
+                if not brand_d.get("name") and prow_brand:
+                    brand_d = generate_new_brand(prow_brand)
+
+                # تتبع الماركات الجديدة
+                if brand_d.get("name"):
+                    bn_low = brand_d["name"].lower()
+                    if bn_low not in known_brand_names and                             (st.session_state.brands_df is None or
+                             not any(brand_d["name"] in str(r.iloc[0])
+                                     for _, r in st.session_state.brands_df.iterrows())):
+                        new_brand_entry = {
+                            "اسم الماركة": brand_d["name"],
+                            "وصف مختصر عن الماركة": f"علامة تجارية متخصصة في العطور الفاخرة — {brand_d['name']}",
+                            "صورة شعار الماركة": "",
+                            "(إختياري) صورة البانر": "",
+                            "(Page Title) عنوان صفحة العلامة التجارية": f"عطور {brand_d['name']} الأصلية | مهووس",
+                            "(SEO Page URL) رابط صفحة العلامة التجارية": brand_d.get("page_url", to_slug(brand_d["name"])),
+                            "(Page Description) وصف صفحة العلامة التجارية":
+                                f"تسوّق أحدث عطور {brand_d['name']} الأصلية بأسعار حصرية من متجر مهووس.",
+                        }
+                        if bn_low not in known_brand_names:
+                            new_brands_found.append(new_brand_entry)
+                            known_brand_names.add(bn_low)
+
+                cat    = match_category(pname, gender_kw)
+                seo    = gen_seo(pname, brand_d, str(size), is_t, gender_kw)
+
+                # توليد الوصف بـ AI (فقط إذا كان المفتاح متوفراً)
+                desc = ""
+                if aok_pipe:
+                    try:
+                        notes = _ai_fetch_notes_only(pname, brand_d.get("name",""), st.session_state.api_key)
+                        desc  = _build_html_description(
+                            pname, is_t, brand_d, str(size), gender_kw,
+                            conc if conc != "غير محدد" else "أو دو بارفيوم", notes)
+                    except Exception:
+                        desc = ""
+
+                r = fill_row(
+                    name=pname, price=str(pprice), sku="",
+                    image=pimg, desc=desc, brand=brand_d,
+                    category=cat, seo=seo, no=str(pi_idx+1),
+                    weight="0.2", weight_unit="kg", size=str(size)
+                )
+                final_rows.append(r)
+                seo_rows.append({
+                    "No. (غير قابل للتعديل)":                str(pi_idx+1),
+                    "اسم المنتج (غير قابل للتعديل)":         pname,
+                    "رابط مخصص للمنتج (SEO Page URL)":       seo.get("url",""),
+                    "عنوان صفحة المنتج (SEO Page Title)":    seo.get("title",""),
+                    "وصف صفحة المنتج (SEO Page Description)":seo.get("desc",""),
+                })
+
+            prog_bar.progress(90)
+
+            # حفظ النتائج
+            st.session_state.pipe_approved   = pd.DataFrame(final_rows) if final_rows else pd.DataFrame()
+            st.session_state.pipe_seo_df     = pd.DataFrame(seo_rows)   if seo_rows  else pd.DataFrame()
+            st.session_state.pipe_new_brands = new_brands_found
+            st.session_state.pipe_step       = 5
+            st.session_state.pipe_running    = False
+            prog_bar.progress(100)
+            status_ph.markdown('<div class="prog-ok">✅ المسار الآلي اكتمل!</div>',
+                               unsafe_allow_html=True)
+            st.rerun()
+
+    # ════════════════════════════════════════════════════════════════
+    # STEP 5 — عرض النتائج والتصدير
+    # ════════════════════════════════════════════════════════════════
+    if st.session_state.pipe_step >= 5 and st.session_state.pipe_approved is not None:
+        approved_df  = st.session_state.pipe_approved
+        raw_results  = st.session_state.pipe_results
+        new_brs      = st.session_state.pipe_new_brands
+
+        new_all    = raw_results[raw_results["الحالة"]=="جديد"]  if raw_results is not None else pd.DataFrame()
+        dups_all   = raw_results[raw_results["الحالة"]=="مكرر"]  if raw_results is not None else pd.DataFrame()
+        suspect_all= raw_results[raw_results["الحالة"]=="مشبوه"] if raw_results is not None else pd.DataFrame()
+
+        st.markdown(f"""
+        <div class="stats-bar">
+          <div class="stat-box"><div class="n">{len(approved_df):,}</div><div class="lb">منتج معتمد نهائياً</div></div>
+          <div class="stat-box"><div class="n" style="color:#43a047">{len(new_all):,}</div><div class="lb">جديد مؤكد</div></div>
+          <div class="stat-box"><div class="n" style="color:#e53935">{len(dups_all):,}</div><div class="lb">مكرر محذوف</div></div>
+          <div class="stat-box"><div class="n" style="color:#f9a825">{len(suspect_all):,}</div><div class="lb">مشبوه (راجعه AI)</div></div>
+          <div class="stat-box"><div class="n" style="color:#7b1fa2">{len(new_brs):,}</div><div class="lb">ماركة جديدة</div></div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # معاينة سريعة
+        if not approved_df.empty:
+            st.markdown("""<div class="sec-title"><div class="bar"></div>
+            <h3>معاينة المنتجات المعتمدة (أول 15)</h3></div>""", unsafe_allow_html=True)
+            preview_cols = [c for c in ["أسم المنتج","الماركة","تصنيف المنتج",
+                                         "سعر المنتج","صورة المنتج"] if c in approved_df.columns]
+            st.dataframe(approved_df[preview_cols].head(15), use_container_width=True)
+
+        # أزرار التصدير
+        st.markdown("""<hr class="gdiv"><div class="sec-title"><div class="bar"></div>
+        <h3>⬇️ التصدير النهائي</h3></div>""", unsafe_allow_html=True)
+        date_str = datetime.now().strftime("%Y-%m-%d_%H-%M")
+
+        ex1, ex2, ex3, ex4, ex5 = st.columns(5)
+        with ex1:
+            if not approved_df.empty:
+                st.download_button(
+                    f"📥 منتجات النواقص — Excel ({len(approved_df):,} منتج)",
+                    export_product_xlsx(approved_df),
+                    f"منتجات_النواقص_{date_str}.xlsx",
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True, key="pipe_dl_xlsx"
+                )
+        with ex2:
+            if not approved_df.empty:
+                st.download_button(
+                    f"📥 منتجات النواقص — CSV ({len(approved_df):,} منتج)",
+                    export_product_csv(approved_df),
+                    f"منتجات_النواقص_{date_str}.csv", "text/csv",
+                    use_container_width=True, key="pipe_dl_csv"
+                )
+        with ex3:
+            if st.session_state.pipe_seo_df is not None and not st.session_state.pipe_seo_df.empty:
+                st.download_button(
+                    "📥 ملف SEO — Excel",
+                    export_seo_xlsx(st.session_state.pipe_seo_df),
+                    f"seo_النواقص_{date_str}.xlsx",
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True, key="pipe_dl_seo"
+                )
+        with ex4:
+            if new_brs:
+                st.download_button(
+                    f"🏷️ ماركات النواقص ({len(new_brs)} ماركة جديدة)",
+                    export_brands_xlsx(new_brs),
+                    f"ماركات_النواقص_{date_str}.xlsx",
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True, key="pipe_dl_brands"
+                )
+            else:
+                st.info("لا ماركات جديدة")
+        with ex5:
+            if not approved_df.empty:
+                if st.button("🛠️ نقل للمُعالج للمراجعة", key="pipe_to_proc",
+                             use_container_width=True):
+                    st.session_state.up_df      = approved_df
+                    st.session_state.up_mapped  = True
+                    st.session_state.up_filename = f"مسار_آلي_{date_str}"
+                    st.session_state.page        = "processor"
+                    st.rerun()
+
+        # معاينة الماركات الجديدة
+        if new_brs:
+            with st.expander(f"🏷️ معاينة الماركات الجديدة ({len(new_brs)} ماركة)"):
+                st.dataframe(pd.DataFrame(new_brs), use_container_width=True)
+
+        # إعادة الضبط
+        st.divider()
+        if st.button("🔄 مسار جديد (إعادة ضبط)", key="pipe_reset"):
+            st.session_state.pipe_store_df   = None
+            st.session_state.pipe_comp_dfs   = []
+            st.session_state.pipe_results    = None
+            st.session_state.pipe_approved   = None
+            st.session_state.pipe_new_brands = []
+            st.session_state.pipe_seo_df     = None
+            st.session_state.pipe_step       = 0
+            st.rerun()
+
 
 # ╔══════════════════════════════════════════════════════════════════╗
 # ║  PAGE 2 — UNIVERSAL PROCESSOR                                   ║
