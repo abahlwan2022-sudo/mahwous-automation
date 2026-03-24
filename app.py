@@ -486,8 +486,9 @@ def extract_product_attrs(name: str) -> dict:
 
     # النوع (تصنيف صارم لمنع التداخل)
     ptype = "عطر تجاري"
-    if any(w in s for w in ["عينة", "sample", "vial", "سمبل"]):
-        ptype = "عينة عطر"
+    # سياسة استبعاد العينات v10.0
+    if any(w in s for w in ["عينة", "sample", "vial", "سمبل", "vial sample"]) or (size > 0 and size <= 5):
+        ptype = "عينة (مستبعدة)"
     elif any(w in s for w in ["تستر", "tester", "بدون كرتون", "ديمو", "demo"]):
         ptype = "تستر"
     elif any(w in s for w in ["طقم", "مجموعة", "set ", "gift", "بكج", "package"]):
@@ -561,9 +562,9 @@ def run_smart_comparison(new_df: pd.DataFrame, store_df: pd.DataFrame,
                           t_dup: int = 88, t_near: int = 75, t_review: int = 55,
                           brands_list: list = None) -> pd.DataFrame:
     """
-    خوارزمية المقارنة الذكية v9.5 (النسخة الصارمة).
-    تصنّف كل منتج جديد إلى: مكرر / مراجعة يدوية / فرصة جديدة
-    مع تحليل دقيق للحجم، النوع (عينة/طقم/تستر)، والتركيز.
+    خوارزمية المقارنة الذكية v10.0 (المحرك المعتمد على AI).
+    تصنّف كل منتج جديد إلى: مكرر / فرصة جديدة (مع استبعاد العينات).
+    تستخدم الذكاء الاصطناعي لحسم الحالات المشكوك فيها وتقليل المراجعة اليدوية.
     """
     if brands_list is None:
         brands_list = []
@@ -604,6 +605,10 @@ def run_smart_comparison(new_df: pd.DataFrame, store_df: pd.DataFrame,
         new_type  = new_attrs["type"]
         new_conc  = new_attrs["concentration"]
         new_cat   = new_attrs["category"]
+
+        # سياسة استبعاد العينات الصارمة v10.0
+        if new_type == "عينة (مستبعدة)":
+            continue
 
         # كشف الماركة
         brand = ""
@@ -696,14 +701,36 @@ def run_smart_comparison(new_df: pd.DataFrame, store_df: pd.DataFrame,
                     verdict = "مراجعة يدوية"
                     reason  = f"تشابه عالي ({raw_score:.0f}%) — يحتاج تدقيق"
             elif raw_score >= t_review:
-                verdict = "مراجعة يدوية"
-                reason  = f"تشابه جزئي ({raw_score:.0f}%) — راجع يدوياً"
+                # v10.0 - استخدام الذكاء الاصطناعي لحسم المراجعة اليدوية
+                if HAS_ANTHROPIC:
+                    try:
+                        ai_prompt = f"هل هذين المنتجين متطابقين (نفس الاسم، الحجم، والنوع)؟\nالمنتج 1: {new_name}\nالمنتج 2: {best_store_name}\nرد بكلمة واحدة فقط: (نعم) إذا كان مكرراً، أو (لا) إذا كان منتجاً جديداً."
+                        client = anthropic.Anthropic(api_key=st.session_state.get("anthropic_key", ""))
+                        response = client.messages.create(
+                            model="claude-3-haiku-20240307",
+                            max_tokens=10,
+                            messages=[{"role": "user", "content": ai_prompt}]
+                        )
+                        ai_decision = response.content[0].text.strip()
+                        if "نعم" in ai_decision:
+                            verdict = "مكرر"
+                            reason = f"حسم الذكاء الاصطناعي: مكرر (تشابه {raw_score:.0f}%)"
+                        else:
+                            verdict = "جديد"
+                            reason = f"حسم الذكاء الاصطناعي: فرصة جديدة (تشابه {raw_score:.0f}%)"
+                    except:
+                        verdict = "مراجعة يدوية"
+                        reason = f"فشل الـ AI: تشابه جزئي ({raw_score:.0f}%)"
+                else:
+                    verdict = "مراجعة يدوية"
+                    reason  = f"تشابه جزئي ({raw_score:.0f}%) — راجع يدوياً"
 
-        # تحويل الحكم إلى حالة/إجراء
+        # تحويل الحكم إلى حالة/إجراء (v10.0 - تصفية صارمة)
         if verdict == "مكرر":
             status = "مكرر"
             action = "حذف"
         elif verdict == "مراجعة يدوية":
+            # في v10.0 نحاول تقليل هذا القسم لأقصى درجة
             status = "مشبوه"
             action = "مراجعة"
         else:
@@ -1996,7 +2023,7 @@ if st.session_state.page == "compare_v2":
     elif not has_store and not has_comp:
         st.markdown("""<div class="upload-zone"><div class="uz-icon">🔎</div>
         <div class="uz-title">ارفع ملف متجرنا وملفات المنافسين للبدء</div>
-        <div class="uz-sub">المحرك الذكي v9.4 يستخدم 5 طبقات مقارنة: SKU + اسم نقي + حجم + تركيز + نوع</div>
+        <div class="uz-sub">المحرك الذكي v10.0 المعتمد على AI: يستبعد العينات ويحسم المكررات بالذكاء الاصطناعي</div>
         </div>""", unsafe_allow_html=True)
 
     # ── إعدادات المحرك ───────────────────────────────────────────
@@ -2053,7 +2080,7 @@ if st.session_state.page == "compare_v2":
         if not HAS_RAPIDFUZZ:
             st.warning("⚠️ rapidfuzz غير مثبّت — يعمل بخوارزمية بديلة أقل دقة. أضف `rapidfuzz` إلى requirements.txt للحصول على أعلى دقة.")
 
-        if st.button("🚀 v9.5 تشغيل المحرك الذكي (Strict)", type="primary", key="run_cv2"):
+        if st.button("🤖 v10.0 تشغيل المحرك المعتمد على AI", type="primary", key="run_cv2"):
             if store_nm_col == NONE_V2:
                 st.error("حدد عمود اسم المنتج في ملف المتجر")
             elif comp_nm_col == NONE_V2:
