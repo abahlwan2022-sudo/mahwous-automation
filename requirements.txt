@@ -4,4 +4,6 @@ numpy>=1.24.0
 openpyxl>=3.1.2
 anthropic>=0.25.0
 requests>=2.31.0
-rapidfuzz>=3.0.0   ← جديدة لخوارزمية المقارنة الذكية
+rapidfuzz>=3.0.0
+beautifulsoup4>=4.12.0
+lxml>=4.9.0
