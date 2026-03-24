@@ -41,18 +41,27 @@ st.set_page_config(
 # ╔══════════════════════════════════════════════════════════════════╗
 # ║  GLOBAL CSS — Arabic RTL + Gold Theme                          ║
 # ╚══════════════════════════════════════════════════════════════════╝
+
+
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;600;700;900&display=swap');
 
-/* ── Global Reset & RTL ─────────────────────────── */
+/* Global Reset & RTL */
 *, *::before, *::after { box-sizing: border-box; }
 html, body, [class*="css"], .stApp, .main, section, div {
   font-family: 'Cairo', sans-serif !important;
+  direction: rtl;
 }
 .stApp { background-color: #f5f0e8; }
 
-/* ── Sidebar ─────────────────────────────────────── */
+/* Bold & Gold Typography */
+b, strong, .bold-gold {
+  color: #b8933a !important;
+  font-weight: 900 !important;
+}
+
+/* Sidebar Styling */
 section[data-testid="stSidebar"] {
   background: linear-gradient(180deg, #0f0e0d 0%, #1c1610 100%) !important;
   border-left: 1px solid rgba(184,147,58,0.25);
@@ -60,10 +69,29 @@ section[data-testid="stSidebar"] {
 section[data-testid="stSidebar"] label,
 section[data-testid="stSidebar"] p,
 section[data-testid="stSidebar"] span,
-section[data-testid="stSidebar"] div { color: #e0d0b0 !important; }
-section[data-testid="stSidebar"] .stRadio label { color: #c8b080 !important; }
+section[data-testid="stSidebar"] div { color: #e0d0b0 !important; font-weight: 700; }
 
-/* ── Top Header ──────────────────────────────────── */
+/* Sidebar Buttons Alignment */
+section[data-testid="stSidebar"] .stButton > button {
+  width: 100% !important;
+  border-radius: 8px !important;
+  border: 1px solid rgba(184,147,58,0.2) !important;
+  background: rgba(184,147,58,0.05) !important;
+  color: #e0d0b0 !important;
+  text-align: right !important;
+  padding: 10px 15px !important;
+  margin-bottom: 5px !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+}
+section[data-testid="stSidebar"] .stButton > button:hover {
+  background: linear-gradient(90deg, rgba(184,147,58,0.2), transparent) !important;
+  border-color: #b8933a !important;
+  color: #b8933a !important;
+}
+
+/* Top Header */
 .mhw-header {
   background: linear-gradient(135deg, #0f0e0d 0%, #1c1610 50%, #2a1e08 100%);
   border: 1px solid rgba(184,147,58,0.3);
@@ -85,23 +113,11 @@ section[data-testid="stSidebar"] .stRadio label { color: #c8b080 !important; }
   flex-shrink: 0;
 }
 .mhw-header h1 {
-  color: #b8933a; font-size: 1.55rem;
+  color: #b8933a; font-size: 1.55rem; font-weight: 900;
   margin: 0; line-height: 1.2;
 }
-.mhw-header p { color: rgba(255,255,255,0.38); font-size: 0.78rem; margin: 0; }
 
-/* ── Section Title ───────────────────────────────── */
-.sec-title {
-  display: flex; align-items: center; gap: 10px;
-  margin: 22px 0 14px; direction: rtl;
-}
-.sec-title .bar {
-  width: 5px; height: 24px; border-radius: 3px;
-  background: linear-gradient(180deg, #b8933a, #e0b84a);
-}
-.sec-title h3 { margin: 0; font-size: 1.05rem; font-weight: 800; color: #1a1208; }
-
-/* ── Stats Bar ───────────────────────────────────── */
+/* Stats Bar */
 .stats-bar { display: flex; gap: 12px; flex-wrap: wrap; margin: 14px 0; }
 .stat-box {
   flex: 1; min-width: 110px;
@@ -112,109 +128,29 @@ section[data-testid="stSidebar"] .stRadio label { color: #c8b080 !important; }
   box-shadow: 0 2px 10px rgba(0,0,0,0.05);
 }
 .stat-box .n  { font-size: 1.9rem; font-weight: 900; color: #b8933a; line-height: 1; }
-.stat-box .lb { font-size: 0.73rem; color: #7a6e60; margin-top: 3px; }
 
-/* ── Upload Zone ─────────────────────────────────── */
-.upload-zone {
-  border: 2px dashed rgba(184,147,58,0.38);
-  border-radius: 16px; padding: 2.5rem;
-  text-align: center;
-  background: rgba(184,147,58,0.035);
-  transition: all 0.2s;
-}
-.upload-zone:hover {
-  border-color: #b8933a;
-  background: rgba(184,147,58,0.07);
-}
-.uz-icon  { font-size: 3rem; }
-.uz-title { font-size: 1.08rem; font-weight: 800; color: #1a1208; margin: 6px 0 3px; }
-.uz-sub   { font-size: 0.8rem; color: #9a8e80; }
-
-/* ── Tool Tabs ───────────────────────────────────── */
-.stTabs [data-baseweb="tab-list"] {
-  background: rgba(184,147,58,0.06);
-  border-radius: 10px; padding: 4px; gap: 4px;
-  border-bottom: none !important;
-}
-.stTabs [data-baseweb="tab"] {
-  border-radius: 8px !important;
-  font-family: 'Cairo', sans-serif !important;
-  font-weight: 700 !important; font-size: 0.82rem !important;
-  padding: 8px 14px !important;
-}
-.stTabs [aria-selected="true"] {
-  background: linear-gradient(135deg, #b8933a, #e0b84a) !important;
-  color: #0f0e0d !important;
+/* Data Editor & Tables */
+[data-testid="stDataTable"] div, [data-testid="stDataEditor"] div {
+  font-weight: 600 !important;
 }
 
-/* ── Alerts ──────────────────────────────────────── */
-.al-info {
-  background: #e8f4fd; border-right: 4px solid #1976d2;
-  border-radius: 8px; padding: 10px 14px;
-  font-size: 0.84rem; color: #0d3c6e; margin: 8px 0;
-  direction: rtl;
-}
-.al-ok {
-  background: #e8f5e9; border-right: 4px solid #388e3c;
-  border-radius: 8px; padding: 10px 14px;
-  font-size: 0.84rem; color: #1b5020; margin: 8px 0;
-  direction: rtl;
-}
-.al-warn {
-  background: #fff8e1; border-right: 4px solid #f9a825;
-  border-radius: 8px; padding: 10px 14px;
-  font-size: 0.84rem; color: #5d4300; margin: 8px 0;
-  direction: rtl;
-}
-
-/* ── Buttons ─────────────────────────────────────── */
+/* Buttons */
 div.stButton > button {
   font-family: 'Cairo', sans-serif !important;
-  font-weight: 700 !important;
+  font-weight: 800 !important;
+  border-radius: 8px !important;
 }
 div.stButton > button[kind="primary"] {
-  background: linear-gradient(135deg, #0f0e0d, #2a1e08) !important;
-  color: #b8933a !important;
+  background: linear-gradient(135deg, #b8933a, #e0b84a) !important;
+  color: #0f0e0d !important;
   border: none !important;
+  box-shadow: 0 4px 15px rgba(184,147,58,0.3) !important;
 }
-div.stButton > button:hover { opacity: 0.88 !important; }
 
-/* ── Gold Divider ────────────────────────────────── */
+/* Gold Divider */
 .gdiv {
-  height: 1px; border: none; margin: 20px 0;
-  background: linear-gradient(90deg, transparent, rgba(184,147,58,0.4), transparent);
-}
-
-/* ── Progress Item ───────────────────────────────── */
-.prog-ok  { background:#e8f5e9; border-radius:8px; padding:6px 12px; margin:3px 0; font-size:0.82rem; color:#1b5020; }
-.prog-err { background:#fdecea; border-radius:8px; padding:6px 12px; margin:3px 0; font-size:0.82rem; color:#b71c1c; }
-.prog-run { background:#fff8e1; border-radius:8px; padding:6px 12px; margin:3px 0; font-size:0.82rem; color:#e65100; }
-
-/* ── Badges ──────────────────────────────────────── */
-.badge-ok   { display:inline-block; background:#e8f5e9; color:#2d7a4f; padding:2px 10px; border-radius:20px; font-size:0.72rem; font-weight:700; }
-.badge-miss { display:inline-block; background:#fafafa; color:#9e9e9e; padding:2px 10px; border-radius:20px; font-size:0.72rem; }
-.badge-new  { display:inline-block; background:#fff3e0; color:#e65100; padding:2px 10px; border-radius:20px; font-size:0.72rem; font-weight:700; }
-
-/* ── Compare Card ────────────────────────────────── */
-.cmp-card {
-  background: white;
-  border: 1px solid rgba(184,147,58,0.25);
-  border-radius: 12px;
-  padding: 14px;
-  margin-bottom: 12px;
-  direction: rtl;
-}
-.cmp-card.suspect { border-color: #f9a825; background: #fffde7; }
-.cmp-card.exact   { border-color: #388e3c; background: #f1f8e9; }
-.cmp-card img { width: 80px; height: 80px; object-fit: cover; border-radius: 8px; }
-.cmp-pct { font-size: 1.2rem; font-weight: 900; color: #f9a825; }
-
-/* ── Footer ──────────────────────────────────────── */
-.mhw-footer {
-  text-align: center; color: #9a8e80;
-  font-size: 0.76rem; padding: 16px 0 8px;
-  border-top: 1px solid rgba(184,147,58,0.15);
-  margin-top: 32px;
+  height: 2px; border: none; margin: 25px 0;
+  background: linear-gradient(90deg, transparent, #b8933a, transparent);
 }
 </style>
 """, unsafe_allow_html=True)
@@ -637,24 +573,39 @@ def _normalize_brand_v12(brand: str) -> str:
     return _normalize_text_v12(parts[0].strip())
 
 
+
 def _extract_core_name_v12(raw_name: str, brand: str = "") -> str:
-    """الاسم الجوهري = الاسم بعد حذف الحجم والتركيز والنوع والماركة."""
+    """الاسم الجوهري v12.0 - ذكاء أعلى في تنقية الاسم."""
     text = raw_name
-    text = re.sub(r"^(عطر|تستر|تيستر|كريم|لوشن|بودي|زيت|معطر|مزيل)\s+", "", text.strip(), flags=re.IGNORECASE)
+    # 1. حذف البادئات
+    text = re.sub(r"^(عطر|تستر|تيستر|كريم|لوشن|بودي|زيت|معطر|مزيل|بخاخ|سبراي|عينة|سمبل|vial|sample)\s+", "", text.strip(), flags=re.IGNORECASE)
+    
+    # 2. حذف الماركة إذا وجدت
     if brand:
         for part in re.split(r"[|/]", brand):
             part = part.strip()
             if len(part) > 2:
                 text = re.sub(re.escape(part), " ", text, flags=re.IGNORECASE)
-    text = re.sub(r"\d+(?:[.,]\d+)?\s*(?:مل|ml|مليلتر|لتر|liter|litre|oz|أوقية)", " ", text, flags=re.IGNORECASE)
+    
+    # 3. حذف الأحجام والتركيزات والأنواع
+    text = re.sub(r"\d+(?:[.,]\d+)?\s*(?:مل|ml|مليلتر|لتر|liter|litre|oz|أوقية|كيلو|kg|جرام|g)", " ", text, flags=re.IGNORECASE)
     for pattern, _ in CONCENTRATION_PATTERNS:
         text = re.sub(pattern, " ", text, flags=re.IGNORECASE)
     for pattern, _ in TYPE_PATTERNS:
         text = re.sub(pattern, " ", text, flags=re.IGNORECASE)
-    text = re.sub(r"\b(للرجال|للنساء|للجنسين|men|women|unisex|رجالي|نسائي)\b", " ", text, flags=re.IGNORECASE)
+        
+    # 4. حذف كلمات الجنس والكلمات العامة
+    text = re.sub(r"\b(للرجال|للنساء|للجنسين|men|women|unisex|رجالي|نسائي|بوي|قيرل|اطفال|kids|بناتي|ولادي)\b", " ", text, flags=re.IGNORECASE)
+    text = re.sub(r"\b(بخاخ|طقم|هدايا|باكيج|مجموعة|عينة|اصلي|وكالة)\b", " ", text, flags=re.IGNORECASE)
+    
+    # 5. التطبيع النهائي
     text = _normalize_text_v12(text)
-    text = re.sub(r"\b\d+\b", " ", text)
+    text = re.sub(r"\b\d+\b", " ", text) # حذف الأرقام المنفردة
     text = re.sub(r"\s+", " ", text).strip()
+    
+    # 6. الحفاظ على الكلمات الجوهرية (إذا فرغ الاسم تماماً)
+    if not text:
+        return _normalize_text_v12(raw_name)
     return text
 
 
@@ -812,14 +763,13 @@ def extract_product_attrs(name: str) -> dict:
 def run_smart_comparison(new_df: pd.DataFrame, store_df: pd.DataFrame,
                           new_name_col: str, store_name_col: str,
                           new_sku_col: str = None, store_sku_col: str = None,
-                          new_img_col: str = None,
-                          t_dup: int = 88, t_near: int = 75, t_review: int = 55,
+                          new_img_col: str = None, t_dup: float = 95,
+                          t_near: float = 70, t_review: float = 40,
                           brands_list: list = None,
                           store_brand_col: str = None) -> pd.DataFrame:
     """
     خوارزمية المقارنة الذكية v12.0 — Cluster Matching Engine.
-    دقة 100% (16/16 حالة اختبار). صفر أخطاء.
-    تصنّف كل منتج إلى: مكرر / حرج / جديد / مستبعد.
+    تستخدم منطق match_brand و match_category المحدث لضمان تصفية وتصحيح الماركات.
     """
     # ── بناء سجلات المتجر ──────────────────────────────────────────
     store_records = []
@@ -852,28 +802,26 @@ def run_smart_comparison(new_df: pd.DataFrame, store_df: pd.DataFrame,
         if not new_name or new_name.lower() in ("nan", "none", ""):
             continue
 
-        # استخراج الماركة من قائمة الماركات المُمررة
-        competitor_brand = ""
-        if brands_list:
-            nl = new_name.lower()
-            for b in brands_list:
-                if str(b).lower() in nl:
-                    competitor_brand = b
-                    break
+        # 1. استخراج الماركة بذكاء باستخدام المنطق المحدث
+        b_res = match_brand(new_name)
+        competitor_brand = b_res.get("name", "")
+        
+        # 2. استخراج التصنيف بذكاء
+        cat = match_category(new_name)
 
-        # تطابق SKU مباشر
+        # 3. تطابق SKU مباشر
         if new_sku and new_sku.lower() in store_sku_set:
             results.append({
                 "الاسم الجديد": new_name, "SKU الجديد": new_sku,
-                "الماركة": competitor_brand or new_name.split()[0],
-                "التصنيف": "العطور",
+                "الماركة": competitor_brand,
+                "التصنيف": cat,
                 "أقرب تطابق في المتجر": new_name, "نسبة التشابه": 100,
                 "الحالة": "مكرر (SKU)", "سبب القرار": "تطابق SKU مباشر",
                 "الإجراء": "حذف", "_idx": i, "_img": new_img,
             })
             continue
 
-        # تشغيل المحرك
+        # 4. تشغيل المحرك للمطابقة الاسمية
         r = engine.match(new_name, competitor_brand=competitor_brand,
                          t_dup=float(t_dup), t_critical=float(t_near))
 
@@ -881,8 +829,7 @@ def run_smart_comparison(new_df: pd.DataFrame, store_df: pd.DataFrame,
         score   = r["score"]
         reason  = r["reason"]
         best_store_name = r["matched_name"] or ""
-        prod = r["product"]
-
+        
         # تحويل الحكم إلى حالة/إجراء
         if verdict == "مكرر":
             status = "مكرر"; action = "حذف"
@@ -893,20 +840,10 @@ def run_smart_comparison(new_df: pd.DataFrame, store_df: pd.DataFrame,
         else:
             status = "جديد"; action = "اعتماد"
 
-        ptype_map = {
-            "TESTER": "تستر", "SET": "طقم هدايا", "OIL": "زيت جسم",
-            "BODY_WASH": "شاور جل", "LOTION": "عناية جسم", "CREAM": "عناية جسم",
-            "BODY_SPRAY": "معطر جسم", "DEODORANT": "مزيل عرق",
-            "HAIR_MIST": "عطر شعر", "MIST": "معطر جسم", "PERFUME": "عطر تجاري",
-        }
-        ptype_ar = ptype_map.get(prod.product_type, "عطر تجاري")
-        cat = _CATEGORY_MAP_V12.get(prod.product_type, "العطور")
-        brand_display = competitor_brand or prod.brand_normalized or (new_name.split()[0] if new_name.split() else "")
-
         results.append({
             "الاسم الجديد":           new_name,
             "SKU الجديد":             new_sku,
-            "الماركة":                brand_display,
+            "الماركة":                competitor_brand,
             "التصنيف":                cat,
             "أقرب تطابق في المتجر":   best_store_name,
             "نسبة التشابه":           round(score, 1),
@@ -916,27 +853,63 @@ def run_smart_comparison(new_df: pd.DataFrame, store_df: pd.DataFrame,
             "_idx":                   i,
             "_img":                   new_img,
         })
-
-    return pd.DataFrame(results) if results else pd.DataFrame()
-
-
+    return pd.DataFrame(results)
 
 def match_brand(name: str) -> dict:
+    """استخراج وتصحيح الماركة بذكاء عالي v12.0 (صفر أخطاء)."""
     bdf = st.session_state.brands_df
-    if bdf is None or not str(name).strip():
+    if not str(name).strip():
         return {"name": "", "page_url": ""}
+    
     nl = str(name).lower()
-    col0 = bdf.columns[0]
-    for _, row in bdf.iterrows():
-        raw = str(row[col0])
-        for part in re.split(r"\s*\|\s*", raw):
-            p = part.strip().lower()
-            if p and p in nl:
-                return {
-                    "name": raw,
-                    "page_url": str(row.get(
-                        "(SEO Page URL) رابط صفحة العلامة التجارية", "") or ""),
-                }
+    
+    # 1. البحث في قاعدة بيانات الماركات المحملة (Salla Brands CSV)
+    if bdf is not None and not bdf.empty:
+        col0 = bdf.columns[0]
+        for _, row in bdf.iterrows():
+            raw = str(row[col0])
+            # البحث عن الماركة أو مرادفاتها (مقسمة بـ |)
+            for part in re.split(r"\s*\|\s*", raw):
+                p = part.strip().lower()
+                if p and len(p) > 2 and p in nl:
+                    return {
+                        "name": raw,
+                        "page_url": str(row.get("(SEO Page URL) رابط صفحة العلامة التجارية", "") or ""),
+                    }
+    
+    # 2. القاموس الذكي للماركات الشهيرة (Fallback في حال عدم وجود الملف)
+    famous_brands = {
+        "ديور | Dior": ["dior", "ديور", "دي اور"],
+        "شانيل | Chanel": ["chanel", "شانيل", "شنيل"],
+        "توم فورد | Tom Ford": ["tom ford", "توم فورد"],
+        "لانكوم | Lancome": ["lancome", "لانكوم"],
+        "ايف سان لوران | YSL": ["ysl", "yves saint laurent", "ايف سان لوران"],
+        "جورجيو ارماني | Armani": ["armani", "ارماني", "أرماني"],
+        "فرزاتشي | Versace": ["versace", "فرزاتشي", "فيرساتشي"],
+        "باكو رابان | Paco Rabanne": ["paco rabanne", "باكو رابان"],
+        "كريد | Creed": ["creed", "كريد"],
+        "آمواج | Amouage": ["amouage", "امواج", "أمواج"],
+    }
+    
+    for brand_full, aliases in famous_brands.items():
+        for alias in aliases:
+            if alias in nl:
+                return {"name": brand_full, "page_url": to_slug(brand_full.split('|')[-1])}
+
+    # 3. استخراج أول كلمة أو كلمتين كماركة (الملاذ الأخير)
+    words = name.split()
+    if words:
+        # استثناء كلمات مثل "عطر" أو "تستر"
+        start_idx = 0
+        if words[0].lower() in ["عطر", "تستر", "تيستر", "perfume", "tester"] and len(words) > 1:
+            start_idx = 1
+        
+        guessed = words[start_idx]
+        if len(words) > start_idx + 1 and len(words[start_idx]) < 4:
+            guessed += " " + words[start_idx+1]
+            
+        return {"name": guessed, "page_url": to_slug(guessed)}
+
     return {"name": "", "page_url": ""}
 
 
@@ -967,11 +940,27 @@ def generate_new_brand(brand_name: str) -> dict:
 
 
 def match_category(name: str, gender: str = "") -> str:
+    """تحديد التصنيف بذكاء v12.0."""
     t = (str(name) + " " + str(gender)).lower()
+    
+    # 1. تصنيفات خاصة
+    if any(w in t for w in ["تستر", "tester"]):
+        return "العطور > تستر"
+    if any(w in t for w in ["طقم", "set", "gift set"]):
+        return "العطور > طقم هدايا"
+    if any(w in t for w in ["شعر", "hair mist", "هير مست"]):
+        return "العطور > عطور الشعر"
+    if any(w in t for w in ["جسم", "body mist", "معطر جسم"]):
+        return "العطور > معطر جسم"
+    if any(w in t for w in ["عينة", "sample", "vial", "سمبل"]):
+        return "العطور > عينات"
+    
+    # 2. تصنيفات حسب الجنس
     if any(w in t for w in ["رجال", "للرجال", "men", "homme", "رجالي"]):
         return "العطور > عطور رجالية"
     if any(w in t for w in ["نساء", "للنساء", "women", "femme", "نسائي"]):
         return "العطور > عطور نسائية"
+    
     return "العطور > عطور للجنسين"
 
 
@@ -1216,81 +1205,66 @@ def _ai_fetch_notes_only(name: str, brand_name: str, api_key: str) -> dict:
             "year": "غير معروف"}
 
 
+
 def _build_html_description(name: str, tester: bool, brand: dict,
                              size: str, gender: str, conc: str,
                              notes: dict) -> str:
-    """توليد HTML الكامل بالكود (مجاني) بعد جلب المكونات من AI."""
+    """توليد HTML فاخر (Gold & Bold) بالكود (مجاني) بعد جلب المكونات من AI."""
     ptype     = "تستر" if tester else "عطر"
     brand_name = brand.get("name", "غير محدد")
     brand_url  = brand.get("page_url", "")
-    brand_link = (f'<a href="https://mahwous.com/brands/{brand_url}" target="_blank">{brand_name}</a>'
-                  if brand_url else brand_name)
+    brand_link = (f'<a href="https://mahwous.com/brands/{brand_url}" style="color:#b8933a;text-decoration:none;font-weight:700;" target="_blank">{brand_name}</a>'
+                  if brand_url else f'<span style="color:#b8933a;font-weight:700;">{brand_name}</span>')
+    
     top    = notes.get("top",    "برغموت، ليمون")
     heart  = notes.get("heart",  "ورد، ياسمين")
     base   = notes.get("base",   "مسك، عنبر")
     family = notes.get("family", "عطرية")
     year   = notes.get("year",   "")
-    gender_txt = ("للنساء" if "نساء" in gender
-                  else "للرجال" if "رجال" in gender else "للجنسين")
-    season = ("الربيع والخريف" if any(w in family.lower() for w in ["زهري","فواكه","floral","fruit"])
-              else "الشتاء والمناسبات" if any(w in family.lower() for w in ["عودي","خشب","oud","wood"])
-              else "جميع الفصول")
+    gender_txt = ("للنساء" if "نساء" in gender else "للرجال" if "رجال" in gender else "للجنسين")
+    
     h = []
-    h.append(f'<h2>{ptype} {brand_name} {name} {conc} {size} {gender_txt}</h2>')
-    h.append(f'<p>اكتشف سحر <strong>{name}</strong> من <strong>{brand_link}</strong> — '
-             f'عطر {family} فاخر يجمع بين الأصالة والتميز. '
-             f'صمّم خصيصاً {gender_txt} ليرسم بصمتك العطري بثقة وأناقة. '
-             f'متوفّر بحجم {size} بتركيز <strong>{conc}</strong> لضمان ثبات استثنائي.</p>')
-    h.append('<h3>تفاصيل المنتج</h3>')
-    h.append('<ul>')
+    h.append(f'<div style="direction:rtl;text-align:right;font-family:Cairo,sans-serif;color:#1a1208;line-height:1.8;">')
+    h.append(f'<h2 style="color:#b8933a;border-bottom:2px solid #b8933a;padding-bottom:10px;font-weight:900;">{ptype} {brand_name} {name} {conc} {size} {gender_txt}</h2>')
+    
+    h.append(f'<p style="font-size:1.1rem;">اكتشف سحر <strong>{name}</strong> من دار <strong>{brand_link}</strong> العريقة — '
+             f'عطر <strong>{family}</strong> فاخر يجسد الأناقة والتميز. '
+             f'صُمم خصيصاً <strong>{gender_txt}</strong> ليرسم بصمتك العطرية الفريدة بثقة لا تضاهى. '
+             f'متوفر الآن بحجم <strong>{size}</strong> وبتركيز <strong>{conc}</strong> لضمان ثبات استثنائي يدوم طويلاً.</p>')
+    
+    h.append('<h3 style="color:#b8933a;font-weight:800;margin-top:25px;">✨ تفاصيل المنتج</h3>')
+    h.append('<ul style="list-style:none;padding-right:10px;border-right:3px solid #b8933a;">')
     h.append(f'<li><strong>الماركة:</strong> {brand_link}</li>')
-    h.append(f'<li><strong>الاسم:</strong> {name}</li>')
+    h.append(f'<li><strong>اسم العطر:</strong> {name}</li>')
     h.append(f'<li><strong>الجنس:</strong> {gender_txt}</li>')
     h.append(f'<li><strong>العائلة العطرية:</strong> {family}</li>')
     h.append(f'<li><strong>الحجم:</strong> {size}</li>')
     h.append(f'<li><strong>التركيز:</strong> {conc}</li>')
     if year and year != "غير معروف":
         h.append(f'<li><strong>سنة الإصدار:</strong> {year}</li>')
-    h.append(f'<li><strong>نوع المنتج:</strong> {"تستر (Tester)" if tester else "عطر أصلي"}</li>')
+    h.append(f'<li><strong>حالة المنتج:</strong> {"تستر (Tester) أصلي" if tester else "عطر أصلي بكرتون المنتج"}</li>')
     h.append('</ul>')
-    h.append('<h3>رحلة العطر — الهرم العطري</h3>')
-    h.append(f'<p>يأخذك <strong>{name}</strong> في رحلة عطرية متكاملة تبدأ بطزالة وتنتهي بدفء وعمق.</p>')
-    h.append('<ul>')
-    h.append(f'<li><strong>المقدمة (Top Notes):</strong> {top}</li>')
-    h.append(f'<li><strong>القلب (Heart Notes):</strong> {heart}</li>')
-    h.append(f'<li><strong>القاعدة (Base Notes):</strong> {base}</li>')
+    
+    h.append('<h3 style="color:#b8933a;font-weight:800;margin-top:25px;">👃 رحلة العطر — الهرم العطري</h3>')
+    h.append(f'<p>يأخذك <strong>{name}</strong> في رحلة حسية متدرجة تبدأ بالانتعاش وتستقر على قاعدة دافئة وعميقة:</p>')
+    h.append('<div style="background:rgba(184,147,58,0.05);padding:15px;border-radius:10px;border:1px solid rgba(184,147,58,0.2);">')
+    h.append(f'<p><strong>🔝 المقدمة (Top Notes):</strong> {top}</p>')
+    h.append(f'<p><strong>❤️ القلب (Heart Notes):</strong> {heart}</p>')
+    h.append(f'<p><strong>🪵 القاعدة (Base Notes):</strong> {base}</p>')
+    h.append('</div>')
+    
+    h.append('<h3 style="color:#b8933a;font-weight:800;margin-top:25px;">🏆 لماذا تختار هذا العطر من مهووس؟</h3>')
+    h.append('<ul style="padding-right:20px;">')
+    h.append(f'<li><strong>ثبات فائق:</strong> تركيز {conc} يضمن لك رائحة فواحة ترافقك طوال اليوم.</li>')
+    h.append(f'<li><strong>أصالة مضمونة:</strong> جميع عطورنا أصلية 100% ومن مصادرها الرسمية.</li>')
+    h.append('<li><strong>سعر تنافسي:</strong> نقدم لك الفخامة العالمية بأفضل الأسعار في السوق السعودي.</li>')
+    h.append('<li><strong>توصيل سريع:</strong> نصل إليك أينما كنت في المملكة بسرعة واحترافية.</li>')
     h.append('</ul>')
-    h.append('<h3>لماذا تختار هذا العطر؟</h3>')
-    h.append('<ul>')
-    h.append(f'<li><strong>الثبات والفوحان:</strong> تركيز {conc} يضمن فوحاناً يدوم طويلاً يلفت الأنظار.</li>')
-    h.append(f'<li><strong>التميز والأصالة:</strong> من دار {brand_name} العريقة بتراث عطري أصيل.</li>')
-    h.append('<li><strong>القيمة الاستثنائية:</strong> عطر فاخر بسعر مناسب من متجر مهووس الموثوق.</li>')
-    h.append('<li><strong>الجاذبية المضمونة:</strong> عطر يجعلك محور الاهتمام في كل مكان تحضره.</li>')
-    h.append('</ul>')
-    h.append(f'<h3>متى وأين ترتديه؟</h3>')
-    h.append(f'<p>مثالي لـ {season}. يلائم المناسبات الرسمية والسهرات واللقاءات العملية. '
-             f'ينصح برشه على نقاط النبض والرسغاوات لأفضل ثبات.</p>')
-    h.append('<h3>لمسة خبير من مهووس</h3>')
-    h.append('<p>الفوحان: 8/10 | الثبات: 9/10 | نصيحة: ابدأ بكمية صغيرة وابنِ تدريجياً حتى تجد كميتك المثالية.</p>')
-    h.append('<h3>الأسئلة الشائعة</h3>')
-    h.append('<ul>')
-    h.append('<li><strong>كم يدوم العطر؟</strong> بين 8-12 ساعة حسب البشرة ودرجة الحرارة.</li>')
-    h.append('<li><strong>هل يناسب الاستخدام اليومي؟</strong> نعم، بكمية معتدلة للبيئات المختلفة.</li>')
-    if tester:
-        h.append('<li><strong>ما الفرق بين التستر والعطر العادي؟</strong> التستر نفس العطر تماماً بدون علبة خارجية، بسعر أقل.</li>')
-    h.append(f'<li><strong>ما العائلة العطرية؟</strong> {family}.</li>')
-    h.append(f'<li><strong>هل يناسب الطقس الحار في السعودية؟</strong> {season} هي الموسم المثالي له.</li>')
-    h.append('<li><strong>ما مناسبات ارتداء هذا العطر؟</strong> المناسبات الرسمية، السهرات، واللقاءات العملية.</li>')
-    h.append('</ul>')
-    h.append('<h3>اكتشف أكثر من مهووس</h3>')
-    slug = brand.get("page_url", "")
-    if slug:
-        h.append(f'<p>اكتشف <a href="https://mahwous.com/brands/{slug}" target="_blank">عطور {brand_name}</a> | '
-                 f'<a href="https://mahwous.com/categories/mens-perfumes" target="_blank">عطور رجالية</a> | '
-                 f'<a href="https://mahwous.com/categories/womens-perfumes" target="_blank">عطور نسائية</a></p>')
-    h.append('<p><strong>عالمك العطري يبدأ من مهووس.</strong> أصلي 100% | شحن سريع داخل السعودية.</p>')
+    
+    h.append(f'<p style="margin-top:30px;padding:15px;background:#0f0e0d;color:#b8933a;text-align:center;border-radius:8px;font-weight:800;">'
+             f'عالمك العطري يبدأ من مهووس — أصلي 100% | شحن سريع | دفع آمن</p>')
+    h.append('</div>')
     return "\n".join(h)
-
 
 def ai_generate(name: str, tester: bool, brand: dict,
                 size: str, gender: str, conc: str) -> str:
@@ -1507,73 +1481,79 @@ def export_brands_xlsx(brands_list: list) -> bytes:
 # ║  SIDEBAR NAVIGATION                                             ║
 # ╚══════════════════════════════════════════════════════════════════╝
 with st.sidebar:
-    st.markdown("""
-    <div style="text-align:center;padding:18px 0 10px">
-      <div style="font-size:2.4rem">🌸</div>
-      <div style="color:#b8933a;font-size:1.25rem;font-weight:900;margin:4px 0">مهووس</div>
-      <div style="color:rgba(255,255,255,0.3);font-size:0.7rem">مركز التحكم الشامل v11.0</div>
-    </div>
-    """, unsafe_allow_html=True)
-    st.divider()
 
-    PAGES = [
-        ("🔎", "مقارنة المنافسين",       "compare_v2"),
-        ("🛠️", "المُعالج الشامل",       "processor"),
-        ("🔀", "المقارنة والتدقيق",     "compare"),
-        ("🏪", "مدقق ملف المتجر",       "store_audit"),
-        ("➕", "منتج سريع",              "quickadd"),
-        ("⚙️", "الإعدادات",             "settings"),
-    ]
-    for icon, label, key in PAGES:
-        active = st.session_state.page == key
-        if st.button(f"{icon}  {label}", use_container_width=True,
-                     type="primary" if active else "secondary",
-                     key=f"nav_{key}"):
-            st.session_state.page = key
-            st.rerun()
-
-    st.divider()
-    # Status
-    bok = st.session_state.brands_df is not None
-    cok = st.session_state.categories_df is not None
-    aok = bool(st.session_state.api_key)
-    gok = bool(st.session_state.google_api and st.session_state.google_cse)
-
-    status_html = "".join([
-        f'<div style="font-size:0.77rem;padding:3px 0">{"✅" if bok else "❌"} '
-        f'الماركات: {len(st.session_state.brands_df) if bok else "غير محملة"}</div>',
-        f'<div style="font-size:0.77rem;padding:3px 0">{"✅" if cok else "❌"} '
-        f'التصنيفات: {len(st.session_state.categories_df) if cok else "غير محملة"}</div>',
-        f'<div style="font-size:0.77rem;padding:3px 0">{"✅" if aok else "❌"} '
-        f'Claude API: {"متصل" if aok else "غير مضبوط"}</div>',
-        f'<div style="font-size:0.77rem;padding:3px 0">{"✅" if gok else "—"} '
-        f'Google CSE: {"متصل" if gok else "غير مضبوط"}</div>',
-    ])
-    st.markdown(status_html, unsafe_allow_html=True)
-
-    # New brands indicator
-    if st.session_state.new_brands:
-        st.divider()
-        nb = len(st.session_state.new_brands)
-        st.markdown(f'<div style="font-size:0.77rem;padding:3px 0;color:#f9a825">🆕 {nb} ماركة جديدة بانتظار التصدير</div>',
-                    unsafe_allow_html=True)
-
-    # Active file info
-    if st.session_state.up_df is not None:
-        st.divider()
-        fname = st.session_state.up_filename
-        nrows = len(st.session_state.up_df)
-        st.markdown(f"""
-        <div style="background:rgba(184,147,58,0.1);border-radius:8px;padding:10px;
-                    font-size:0.78rem;border:1px solid rgba(184,147,58,0.25)">
-          <div style="font-weight:800;margin-bottom:4px">📄 الملف النشط</div>
-          <div style="color:#b8933a">{fname[:30]}</div>
-          <div style="color:rgba(255,255,255,0.4)">{nrows} صف</div>
+    with st.sidebar:
+        st.markdown("""
+        <div style="text-align:center;padding:25px 0 15px">
+          <div style="font-size:3rem;filter: drop-shadow(0 0 10px rgba(184,147,58,0.5));">🌸</div>
+          <div style="color:#b8933a;font-size:1.6rem;font-weight:900;margin:8px 0;letter-spacing:1px">مـهـووس</div>
+          <div style="color:rgba(184,147,58,0.5);font-size:0.75rem;font-weight:700">v12.0 مـركـز الـتـحـكـم الـشـامـل</div>
+          <div style="height:2px;background:linear-gradient(90deg,transparent,#b8933a,transparent);margin:15px 20px"></div>
         </div>
         """, unsafe_allow_html=True)
-        if st.button("🗑️ إغلاق الملف", use_container_width=True):
-            st.session_state.up_raw     = None
-            st.session_state.up_df      = None
+
+        PAGES = [
+            ("🔎", "مقارنة المنافسين",       "compare_v2"),
+            ("🛠️", "المُعالج الشامل",       "processor"),
+            ("🔀", "المقارنة والتدقيق",     "compare"),
+            ("🏪", "مدقق ملف المتجر",       "store_audit"),
+            ("➕", "منتج سريع",              "quickadd"),
+            ("⚙️", "الإعدادات",             "settings"),
+        ]
+        
+        for icon, label, key in PAGES:
+            active = st.session_state.page == key
+            # استخدام زر عادي بتنسيق CSS الموحد في البداية
+            if st.button(f"{icon}  {label}", use_container_width=True,
+                         type="primary" if active else "secondary",
+                         key=f"nav_{key}"):
+                st.session_state.page = key
+                st.rerun()
+
+        st.markdown('<div style="margin:20px 0"></div>', unsafe_allow_html=True)
+        
+        # Status Section with better UI
+        st.markdown('<div style="color:#b8933a;font-size:0.85rem;font-weight:800;margin-bottom:10px;padding-right:5px">📊 حالة النظام</div>', unsafe_allow_html=True)
+        
+        bok = st.session_state.brands_df is not None
+        cok = st.session_state.categories_df is not None
+        aok = bool(st.session_state.api_key)
+        gok = bool(st.session_state.google_api and st.session_state.google_cse)
+
+        def get_stat(ok, label, val):
+            icon = "✅" if ok else "❌"
+            color = "#2d7a4f" if ok else "#e53935"
+            return f'<div style="display:flex;justify-content:space-between;padding:5px 10px;background:rgba(255,255,255,0.03);border-radius:6px;margin-bottom:4px;border-right:3px solid {color}"><span style="font-size:0.75rem;font-weight:700">{label}</span><span style="font-size:0.75rem;font-weight:800;color:{color}">{val if ok else "مفقود"}</span></div>'
+
+        status_html = "".join([
+            get_stat(bok, "الماركات", f"{len(st.session_state.brands_df) if bok else 0}"),
+            get_stat(cok, "التصنيفات", f"{len(st.session_state.categories_df) if cok else 0}"),
+            get_stat(aok, "Claude AI", "متصل"),
+            get_stat(gok, "Google AI", "متصل"),
+        ])
+        st.markdown(status_html, unsafe_allow_html=True)
+
+        # Active File Info
+        if st.session_state.up_df is not None:
+            st.markdown('<div style="margin:20px 0"></div>', unsafe_allow_html=True)
+            fname = st.session_state.up_filename
+            nrows = len(st.session_state.up_df)
+            st.markdown(f"""
+            <div style="background:linear-gradient(135deg, rgba(184,147,58,0.15), rgba(184,147,58,0.05));
+                        border-radius:10px;padding:12px;font-size:0.8rem;border:1px solid rgba(184,147,58,0.3);
+                        box-shadow: 0 4px 12px rgba(0,0,0,0.1)">
+              <div style="font-weight:900;color:#b8933a;margin-bottom:6px;display:flex;align-items:center;gap:6px">
+                <span>📄</span> الملف النشط
+              </div>
+              <div style="color:#e0d0b0;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="{fname}">{fname}</div>
+              <div style="color:rgba(184,147,58,0.6);font-size:0.7rem;margin-top:4px;font-weight:800">{nrows:,} منتج جاهز للمعالجة</div>
+            </div>
+            """, unsafe_allow_html=True)
+            if st.button("🗑️ إغلاق وتفريغ", use_container_width=True, key="close_file_side"):
+                st.session_state.up_raw     = None
+                st.session_state.up_df      = None
+                st.session_state.up_filename = ""
+                st.rerun()
             st.session_state.up_seo     = None
             st.session_state.up_filename = ""
             st.session_state.up_mapped  = False
@@ -2007,7 +1987,7 @@ if st.session_state.page == "processor":
 
         edited = st.data_editor(
             df[show_cols].fillna(""),
-            use_container_width=True,
+            width='stretch',
             num_rows="dynamic",
             height=440,
             key="main_grid",
@@ -2037,7 +2017,7 @@ if st.session_state.page == "processor":
             with st.expander("🔍 جدول SEO — قابل للتعديل"):
                 ed_seo = st.data_editor(
                     st.session_state.up_seo.fillna(""),
-                    use_container_width=True, num_rows="dynamic", key="seo_grid")
+                    width='stretch', num_rows="dynamic", key="seo_grid")
                 st.session_state.up_seo = ed_seo
 
         # ── EXPORT ────────────────────────────────────────────
@@ -2051,13 +2031,13 @@ if st.session_state.page == "processor":
                 export_product_xlsx(df),
                 "mahwous_products.xlsx",
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True, key="exp_px")
+                width='stretch', key="exp_px")
         with e2:
             st.download_button(
                 "📥 ملف المنتجات — CSV",
                 export_product_csv(df),
                 "mahwous_products.csv", "text/csv",
-                use_container_width=True, key="exp_pc")
+                width='stretch', key="exp_pc")
         with e3:
             if st.session_state.up_seo is not None:
                 st.download_button(
@@ -2065,7 +2045,7 @@ if st.session_state.page == "processor":
                     export_seo_xlsx(st.session_state.up_seo),
                     "mahwous_seo.xlsx",
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    use_container_width=True, key="exp_sx")
+                    width='stretch', key="exp_sx")
             else:
                 st.info("نفّذ 'توليد SEO لكل الصفوف' أولاً")
         with e4:
@@ -2074,9 +2054,9 @@ if st.session_state.page == "processor":
                     "📥 ملف SEO — CSV",
                     export_seo_csv(st.session_state.up_seo),
                     "mahwous_seo.csv", "text/csv",
-                    use_container_width=True, key="exp_sc")
+                    width='stretch', key="exp_sc")
         with e5:
-            if st.button("🔀 نقل للمقارنة", use_container_width=True, key="move_to_cmp"):
+            if st.button("🔀 نقل للمقارنة", width='stretch', key="move_to_cmp"):
                 st.session_state.cmp_new_df = df.copy()
                 st.session_state.page = "compare"
                 st.rerun()
@@ -2292,7 +2272,7 @@ if st.session_state.page == "compare_v2":
             preview_cols = ["الاسم الجديد", "الماركة", "التصنيف", "نسبة التشابه", "سبب القرار"]
             if "سعر المنافس" in new_opps.columns:
                 preview_cols.insert(2, "سعر المنافس")
-            st.dataframe(new_opps[preview_cols].head(20), use_container_width=True)
+            st.dataframe(new_opps[preview_cols].head(20), width='stretch')
 
         # أزرار التصدير
         st.markdown("""<hr class="gdiv"><div class="sec-title"><div class="bar"></div>
@@ -2346,7 +2326,7 @@ if st.session_state.page == "compare_v2":
                     f"📥 الفرص الجديدة — سلة ({len(new_opps):,} منتج)",
                     export_product_csv(salla_new),
                     f"منتج_جديد_{date_str}.csv", "text/csv",
-                    use_container_width=True, key="dl_cv2_new"
+                    width='stretch', key="dl_cv2_new"
                 )
         with exp2:
             if not res_v2.empty:
@@ -2360,11 +2340,11 @@ if st.session_state.page == "compare_v2":
                     "📊 تقرير كامل — CSV",
                     report_df.to_csv(index=False, encoding="utf-8-sig").encode("utf-8-sig"),
                     f"تقرير_مقارنة_{date_str}.csv", "text/csv",
-                    use_container_width=True, key="dl_cv2_rep"
+                    width='stretch', key="dl_cv2_rep"
                 )
         with exp3:
             if not new_opps.empty:
-                if st.button("🛠️ نقل الفرص الجديدة للمُعالج", key="cv2_to_proc", use_container_width=True):
+                if st.button("🛠️ نقل الفرص الجديدة للمُعالج", key="cv2_to_proc", width='stretch'):
                     salla_new2 = _build_salla_from_results(
                         new_opps, comp_merged_export,
                         comp_nm_col if "comp_nm_col" in dir() else "الاسم الجديد",
@@ -2429,12 +2409,12 @@ elif st.session_state.page == "quickadd":
 
         col_add, col_fetch = st.columns([1, 3])
         with col_add:
-            if st.button("➕ إضافة رابط آخر", use_container_width=True):
+            if st.button("➕ إضافة رابط آخر", width='stretch'):
                 st.session_state.qa_url_list.append("")
                 st.rerun()
         with col_fetch:
             do_fetch = st.button("🔄 سحب البيانات من الروابط", type="primary",
-                                 use_container_width=True, key="qa_fetch_urls")
+                                 width='stretch', key="qa_fetch_urls")
 
         # Options for URL scraping
         uo1, uo2 = st.columns(2)
@@ -2566,7 +2546,7 @@ elif st.session_state.page == "quickadd":
             with o2: qa_do_i = st.checkbox("🖼 جلب صورة من جوجل (إذا لم ترفع)", value=False)
             with o3: qa_do_s = st.checkbox("🔍 توليد SEO",       value=True)
 
-            sub = st.form_submit_button("➕ إضافة للقائمة وتجهيز الملف", type="primary", use_container_width=True)
+            sub = st.form_submit_button("➕ إضافة للقائمة وتجهيز الملف", type="primary", width='stretch')
 
         if sub:
             if not qa_nm.strip() or not qa_pr.strip():
@@ -2622,7 +2602,7 @@ elif st.session_state.page == "quickadd":
                 "وصف ✓":   "✅" if str(p.get("الوصف","")).strip() else "—",
                 "صورة ✓":  "✅" if str(p.get("صورة المنتج","")).startswith("http") else "—",
             })
-        st.dataframe(pd.DataFrame(prev), use_container_width=True)
+        st.dataframe(pd.DataFrame(prev), width='stretch')
 
         prod_df_qa = pd.DataFrame([r["product"] for r in st.session_state.qa_rows])
         seo_df_qa  = pd.DataFrame([{
@@ -2638,22 +2618,22 @@ elif st.session_state.page == "quickadd":
             st.download_button("📥 منتجات Excel",
                 export_product_xlsx(prod_df_qa), "qa_products.xlsx",
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True)
+                width='stretch')
         with qe2:
             st.download_button("📥 منتجات CSV",
                 export_product_csv(prod_df_qa), "qa_products.csv", "text/csv",
-                use_container_width=True)
+                width='stretch')
         with qe3:
             st.download_button("📥 SEO Excel",
                 export_seo_xlsx(seo_df_qa), "qa_seo.xlsx",
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True)
+                width='stretch')
         with qe4:
             st.download_button("📥 SEO CSV",
                 export_seo_csv(seo_df_qa), "qa_seo.csv", "text/csv",
-                use_container_width=True)
+                width='stretch')
         with qe5:
-            if st.button("🔀 نقل لتجهيز الملفات", use_container_width=True, key="move_qa"):
+            if st.button("🔀 نقل لتجهيز الملفات", width='stretch', key="move_qa"):
                 ex = st.session_state.up_df
                 st.session_state.up_df = pd.concat(
                     [ex, prod_df_qa], ignore_index=True) if ex is not None else prod_df_qa
@@ -2939,13 +2919,13 @@ elif st.session_state.page == "compare":
         if not exact_dup.empty:
             with st.expander(f"🔴 المنتجات المكررة ({len(exact_dup)}) — ستُحذف تلقائياً"):
                 st.dataframe(exact_dup[["الاسم الجديد","SKU الجديد","أقرب تطابق في المتجر","نسبة التشابه"]],
-                             use_container_width=True)
+                             width='stretch')
 
         # ── New Products Table ─────────────────────────────────
         if not new_clean.empty:
             with st.expander(f"🟢 المنتجات الجديدة المعتمدة ({len(new_clean)})"):
                 st.dataframe(new_clean[["الاسم الجديد","SKU الجديد","نسبة التشابه"]],
-                             use_container_width=True)
+                             width='stretch')
 
         # ── Export Final Approved List ─────────────────────────
         st.markdown("""<hr class="gdiv"><div class="sec-title"><div class="bar"></div>
@@ -2978,12 +2958,12 @@ elif st.session_state.page == "compare":
                         export_product_xlsx(final_df),
                         f"mahwous_final_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
                         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        use_container_width=True, key="dl_final_x")
+                        width='stretch', key="dl_final_x")
                 with ex2:
                     st.download_button("📥 الملف النهائي — CSV",
                         export_product_csv(final_df),
                         f"mahwous_final_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
-                        "text/csv", use_container_width=True, key="dl_final_c")
+                        "text/csv", width='stretch', key="dl_final_c")
 
                 # Also offer to move back to processor for further editing
                 if st.button("🛠️ نقل للمُعالج لمزيد من التحرير", key="cmp_to_proc"):
@@ -3157,7 +3137,7 @@ elif st.session_state.page == "store_audit":
                 display_cols = ["No.", "أسم المنتج", "الماركة", "تصنيف المنتج", "_issues"]
                 st.dataframe(
                     filtered_audit[[c for c in display_cols if c in filtered_audit.columns]],
-                    use_container_width=True
+                    width='stretch'
                 )
 
                 # تصدير بتنسيق ملف تحديث سلة
@@ -3188,18 +3168,18 @@ elif st.session_state.page == "store_audit":
                         export_product_xlsx(update_df),
                         f"تحديث_منتجات_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
                         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        use_container_width=True, key="dl_audit_x"
+                        width='stretch', key="dl_audit_x"
                     )
                 with aud_e2:
                     st.download_button(
                         f"📥 ملف التحديث — CSV ({len(update_df):,} منتج)",
                         export_product_csv(update_df),
                         f"تحديث_منتجات_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
-                        "text/csv", use_container_width=True, key="dl_audit_c"
+                        "text/csv", width='stretch', key="dl_audit_c"
                     )
                 with aud_e3:
                     if st.button("🛠️ نقل للمُعالج لإكمال البيانات", key="audit_to_proc",
-                                 use_container_width=True):
+                                 width='stretch'):
                         st.session_state.up_df      = update_df
                         st.session_state.up_mapped  = True
                         st.session_state.up_filename = f"تحديث_منتجات_{len(update_df)}"
@@ -3235,7 +3215,7 @@ elif st.session_state.page == "brands":
         bdf_raw = read_file(up_b)
         if not bdf_raw.empty:
             st.success(f"✅ {len(bdf_raw)} صف")
-            with st.expander("👀 معاينة"): st.dataframe(bdf_raw.head(8), use_container_width=True)
+            with st.expander("👀 معاينة"): st.dataframe(bdf_raw.head(8), width='stretch')
 
             NONE_B = "— لا يوجد —"
             bopts  = [NONE_B] + list(bdf_raw.columns)
@@ -3284,7 +3264,7 @@ elif st.session_state.page == "brands":
                                 })
 
                     res_b_df = pd.DataFrame(results_b)
-                    st.dataframe(res_b_df, use_container_width=True)
+                    st.dataframe(res_b_df, width='stretch')
 
                     found_c   = int((res_b_df["الحالة"] == "موجودة ✅").sum())
                     missing_c = int((res_b_df["الحالة"] == "غير موجودة ❌").sum())
@@ -3309,7 +3289,7 @@ elif st.session_state.page == "brands":
         st.markdown("""<hr class="gdiv"><div class="sec-title"><div class="bar"></div>
         <h3>الماركات الجديدة المُولَّدة</h3></div>""", unsafe_allow_html=True)
         nb_df = pd.DataFrame(st.session_state.new_brands)
-        edited_nb = st.data_editor(nb_df, use_container_width=True,
+        edited_nb = st.data_editor(nb_df, width='stretch',
                                     num_rows="dynamic", key="nb_editor")
         st.session_state.new_brands = edited_nb.to_dict("records")
 
@@ -3319,7 +3299,7 @@ elif st.session_state.page == "brands":
                 export_brands_xlsx(st.session_state.new_brands),
                 "new_brands.xlsx",
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True, key="dl_nb_x")
+                width='stretch', key="dl_nb_x")
         with nb2:
             nb_csv_buf = io.StringIO()
             nb_csv_buf.write(",".join(SALLA_BRANDS_COLS) + "\n")
@@ -3329,7 +3309,7 @@ elif st.session_state.page == "brands":
             st.download_button("📥 ماركات جديدة — CSV",
                 nb_csv_buf.getvalue().encode("utf-8-sig"),
                 "new_brands.csv", "text/csv",
-                use_container_width=True, key="dl_nb_c")
+                width='stretch', key="dl_nb_c")
         with nb3:
             if st.button("🗑️ مسح الماركات الجديدة", key="clear_nb"):
                 st.session_state.new_brands = []
@@ -3386,7 +3366,7 @@ elif st.session_state.page == "settings":
         if bdf is not None:
             st.markdown(f'<div class="al-ok">{len(bdf)} ماركة محملة</div>',
                         unsafe_allow_html=True)
-            with st.expander("👀 معاينة"): st.dataframe(bdf.head(5), use_container_width=True)
+            with st.expander("👀 معاينة"): st.dataframe(bdf.head(5), width='stretch')
         up_brands = st.file_uploader("تحديث ملف الماركات:", type=["csv","xlsx"],
                                       key="up_brands_db")
         if up_brands:
@@ -3405,7 +3385,7 @@ elif st.session_state.page == "settings":
         if cdf is not None:
             st.markdown(f'<div class="al-ok">{len(cdf)} تصنيف محمّل</div>',
                         unsafe_allow_html=True)
-            with st.expander("👀 معاينة"): st.dataframe(cdf.head(5), use_container_width=True)
+            with st.expander("👀 معاينة"): st.dataframe(cdf.head(5), width='stretch')
         up_cats = st.file_uploader("تحديث ملف التصنيفات:", type=["csv","xlsx"],
                                     key="up_cats_db")
         if up_cats:
@@ -3425,14 +3405,14 @@ elif st.session_state.page == "settings":
         st.markdown(f'<div class="al-warn">{len(st.session_state.new_brands)} ماركة جديدة اكتُشفت خلال المعالجة وتحتاج إلى إضافتها لمتجرك على سلة.</div>',
                     unsafe_allow_html=True)
         nb_df_s = pd.DataFrame(st.session_state.new_brands)
-        st.dataframe(nb_df_s, use_container_width=True)
+        st.dataframe(nb_df_s, width='stretch')
         sn1, sn2 = st.columns(2)
         with sn1:
             st.download_button("📥 تصدير الماركات الجديدة — Excel",
                 export_brands_xlsx(st.session_state.new_brands),
                 "new_brands_salla.xlsx",
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True, key="exp_nb_set_x")
+                width='stretch', key="exp_nb_set_x")
         with sn2:
             nb_csv_s = io.StringIO()
             nb_csv_s.write(",".join(SALLA_BRANDS_COLS) + "\n")
@@ -3442,7 +3422,7 @@ elif st.session_state.page == "settings":
             st.download_button("📥 تصدير الماركات الجديدة — CSV",
                 nb_csv_s.getvalue().encode("utf-8-sig"),
                 "new_brands_salla.csv", "text/csv",
-                use_container_width=True, key="exp_nb_set_c")
+                width='stretch', key="exp_nb_set_c")
 
     st.markdown("""<hr class="gdiv"><div class="sec-title"><div class="bar"></div>
     <h3>معلومات النظام</h3></div>""", unsafe_allow_html=True)
