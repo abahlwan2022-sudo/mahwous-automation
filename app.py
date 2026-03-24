@@ -462,39 +462,50 @@ def _fuzzy_ratio(a: str, b: str) -> int:
 _CATEGORY_MAP_V94 = {
     "تستر":        "العطور > تستر",
     "طقم هدايا":   "العطور > طقم هدايا",
+    "عينة عطر":    "العطور > عينات",
     "عطر شعر":     "العطور > عطور الشعر",
     "عناية جسم":   "العناية > لوشن وكريم",
     "شاور جل":     "العناية > شاور جل",
     "مزيل عرق":    "العناية > مزيل العرق",
     "معطر جسم":    "العطور > معطر جسم",
+    "زيت جسم":     "العناية > زيت جسم",
+    "مكياج":       "المكياج",
     "عطر تجاري":   "العطور",
 }
 
 
 def extract_product_attrs(name: str) -> dict:
-    """استخراج الحجم، النوع، التركيز، والاسم النقي من اسم المنتج."""
+    """استخراج الحجم، النوع، التركيز، والاسم النقي من اسم المنتج - v9.5 (معايير صارمة)."""
     s = str(name).lower().strip()
 
-    # الحجم
-    m = re.search(r"(\d+)\s*(?:مل|ml|ملل|cc)", s, re.IGNORECASE)
-    size = int(m.group(1)) if m else 0
+    # الحجم (دعم الأحجام الصغيرة جداً والعينات)
+    m = re.search(r"(\d+(?:\.\d+)?)\s*(?:مل|ml|ملل|cc|جرام|g)", s, re.IGNORECASE)
+    size = float(m.group(1)) if m else 0
+    if size > 0 and size.is_integer():
+        size = int(size)
 
-    # النوع
+    # النوع (تصنيف صارم لمنع التداخل)
     ptype = "عطر تجاري"
-    if any(w in s for w in ["تستر", "tester", "بدون كرتون", "ديمو", "demo"]):
+    if any(w in s for w in ["عينة", "sample", "vial", "سمبل"]):
+        ptype = "عينة عطر"
+    elif any(w in s for w in ["تستر", "tester", "بدون كرتون", "ديمو", "demo"]):
         ptype = "تستر"
-    elif any(w in s for w in ["طقم", "مجموعة", "set ", "gift"]):
+    elif any(w in s for w in ["طقم", "مجموعة", "set ", "gift", "بكج", "package"]):
         ptype = "طقم هدايا"
     elif any(w in s for w in ["عطر شعر", "hair mist", "للشعر"]):
         ptype = "عطر شعر"
-    elif any(w in s for w in ["لوشن", "lotion", "كريم", "cream", "body butter"]):
+    elif any(w in s for w in ["لوشن", "lotion", "كريم", "cream", "body butter", "ترطيب"]):
         ptype = "عناية جسم"
     elif any(w in s for w in ["شاور", "shower", "جل استحمام", "bath"]):
         ptype = "شاور جل"
     elif any(w in s for w in ["مزيل", "deodorant", "ديودرنت", "roll-on", "stick"]):
         ptype = "مزيل عرق"
-    elif any(w in s for w in ["بدي مست", "body mist", "معطر جسم", "body spray"]):
+    elif any(w in s for w in ["بدي مست", "body mist", "معطر جسم", "body spray", "بخاخ جسم"]):
         ptype = "معطر جسم"
+    elif any(w in s for w in ["زيت جسم", "body oil"]):
+        ptype = "زيت جسم"
+    elif any(w in s for w in ["ماسكرا", "mascara", "رموش"]):
+        ptype = "مكياج"
 
     # التركيز
     conc = "غير محدد"
@@ -510,13 +521,15 @@ def extract_product_attrs(name: str) -> dict:
         conc = "Parfum"
     elif any(w in s for w in ["edc", "cologne", "كولونيا"]):
         conc = "EDC"
+    
     if any(w in s for w in ["intense", "انتنس", "انتنز"]):
-        conc += " Intense"
+        conc = (conc if conc != "غير محدد" else "") + " Intense"
     if any(w in s for w in ["absolu", "ابسولو"]):
-        conc += " Absolu"
+        conc = (conc if conc != "غير محدد" else "") + " Absolu"
+    conc = conc.strip()
 
-    # الاسم النقي
-    clean = re.sub(r"\d+\s*(?:مل|ml|ملل|cc|g|جرام|oz|x\s*\d+)", "", s)
+    # الاسم النقي (تحسين التنظيف لمنع التشابه الخاطئ)
+    clean = re.sub(r"\d+(?:\.\d+)?\s*(?:مل|ml|ملل|cc|g|جرام|oz|x\s*\d+)", "", s)
     strip_words = [
         "eau de parfum", "eau de toilette", "le parfum", "de parfum",
         "او دي بارفيوم", "او دو بارفيوم", "او دي تواليت", "او دو تواليت",
@@ -525,7 +538,8 @@ def extract_product_attrs(name: str) -> dict:
         "عطر", "طقم", "مجموعة", "تستر", "tester", "للرجال", "للنساء",
         "نسائي", "رجالي", "للجنسين", "مركز", "hair mist", "body mist",
         "شاور جل", "لوشن", "set", "intense", "absolu", "انتنس", "ابسولو",
-        "للشعر", "spray", "بدون كرتون", "gift",
+        "للشعر", "spray", "بدون كرتون", "gift", "عينة", "sample", "vial",
+        "سمبل", "بخاخ جسم", "معطر جسم", "زيت جسم", "بكج", "package"
     ]
     for w in sorted(strip_words, key=len, reverse=True):
         clean = clean.replace(w, " ")
@@ -547,9 +561,9 @@ def run_smart_comparison(new_df: pd.DataFrame, store_df: pd.DataFrame,
                           t_dup: int = 88, t_near: int = 75, t_review: int = 55,
                           brands_list: list = None) -> pd.DataFrame:
     """
-    خوارزمية المقارنة الذكية v9.4 المدمجة في Streamlit.
+    خوارزمية المقارنة الذكية v9.5 (النسخة الصارمة).
     تصنّف كل منتج جديد إلى: مكرر / مراجعة يدوية / فرصة جديدة
-    مع استخدام rapidfuzz + تحليل الحجم والتركيز والنوع.
+    مع تحليل دقيق للحجم، النوع (عينة/طقم/تستر)، والتركيز.
     """
     if brands_list is None:
         brands_list = []
@@ -657,28 +671,30 @@ def run_smart_comparison(new_df: pd.DataFrame, store_df: pd.DataFrame,
                     s_conc = sp["concentration"]
 
             if raw_score >= t_dup:
+                # معايير صارمة جداً للمكررات
                 if new_type != s_type:
-                    verdict = "فرصة جديدة"
+                    verdict = "جديد"
                     reason  = f"نوع مختلف — المنافس: ({new_type}) | متجرنا: ({s_type})"
-                elif new_size != s_size and new_size != 0 and s_size != 0:
-                    verdict = "فرصة جديدة"
+                elif abs(new_size - s_size) > 0.1 and new_size != 0 and s_size != 0:
+                    verdict = "جديد"
                     reason  = f"حجم مختلف — المنافس: ({new_size}مل) | متجرنا: ({s_size}مل)"
                 elif (new_conc != s_conc and new_conc != "غير محدد" and s_conc != "غير محدد"):
-                    verdict = "فرصة جديدة"
+                    verdict = "جديد"
                     reason  = f"تركيز مختلف — المنافس: ({new_conc}) | متجرنا: ({s_conc})"
                 else:
                     verdict = "مكرر"
                     reason  = f"تطابق تام ({raw_score:.0f}%) — اسم + حجم + تركيز + نوع"
             elif raw_score >= t_near:
+                # تشابه قوي ولكن قد يكون فرصة
                 if new_type != s_type:
-                    verdict = "فرصة جديدة"
+                    verdict = "جديد"
                     reason  = f"تشابه قوي ({raw_score:.0f}%) لكن النوع مختلف"
-                elif new_size != s_size and new_size != 0 and s_size != 0:
-                    verdict = "فرصة جديدة"
+                elif abs(new_size - s_size) > 0.1 and new_size != 0 and s_size != 0:
+                    verdict = "جديد"
                     reason  = f"تشابه قوي ({raw_score:.0f}%) لكن الحجم مختلف"
                 else:
                     verdict = "مراجعة يدوية"
-                    reason  = f"تشابه ({raw_score:.0f}%) — راجع يدوياً"
+                    reason  = f"تشابه عالي ({raw_score:.0f}%) — يحتاج تدقيق"
             elif raw_score >= t_review:
                 verdict = "مراجعة يدوية"
                 reason  = f"تشابه جزئي ({raw_score:.0f}%) — راجع يدوياً"
@@ -1998,13 +2014,16 @@ if st.session_state.page == "compare_v2":
         comp_opts_v2  = [NONE_V2] + comp_all_cols
 
         def giv2(cols, kws, opts):
+            # v9.5 - الأولوية القصوى لـ "أسم المنتج" لمنع الخطأ
+            if "أسم المنتج" in cols:
+                return opts.index("أسم المنتج")
             g = auto_guess_col(cols, kws)
             return opts.index(g) if g in opts else 0
 
         cv2_r1, cv2_r2, cv2_r3, cv2_r4 = st.columns(4)
         with cv2_r1:
             store_nm_col = st.selectbox("عمود الاسم (المتجر):", store_opts_v2,
-                index=giv2(store_df_v2.columns, ["اسم","name","منتج"], store_opts_v2),
+                index=giv2(store_df_v2.columns, ["أسم المنتج","اسم","name","منتج"], store_opts_v2),
                 key="cv2_snm")
         with cv2_r2:
             store_sk_col = st.selectbox("عمود SKU (المتجر):", store_opts_v2,
@@ -2025,14 +2044,16 @@ if st.session_state.page == "compare_v2":
                 index=giv2(comp_all_cols, ["صورة","src","image"], comp_opts_v2),
                 key="cv2_cimg")
         with cv2_r6:
-            t_dup_v2  = st.slider("عتبة المكرر (%):", 70, 98, 88, key="cv2_tdup")
+            t_dup_v2  = st.slider("عتبة المكرر (%):", 70, 98, 98, key="cv2_tdup")
+            st.caption("💡 **المكرر (98%):** ارفعها إذا كنت تريد حذف المتطابق حرفياً فقط. نزلها (إلى 90%) إذا كان المنافس يكتب أسماء مختصرة.")
         with cv2_r7:
-            t_near_v2 = st.slider("عتبة المراجعة (%):", 40, 85, 60, key="cv2_tnear")
+            t_near_v2 = st.slider("عتبة المراجعة (%):", 40, 85, 70, key="cv2_tnear")
+            st.caption("💡 **المراجعة (70%):** هي 'الوزنية الذهبية' للعطور. ارفعها لتقليل عدد النتائج وزيادة دقتها، نزلها لاكتشاف فرص أكثر (ولكن مجهود مراجعة أكبر).")
 
         if not HAS_RAPIDFUZZ:
             st.warning("⚠️ rapidfuzz غير مثبّت — يعمل بخوارزمية بديلة أقل دقة. أضف `rapidfuzz` إلى requirements.txt للحصول على أعلى دقة.")
 
-        if st.button("🚀 تشغيل المحرك الذكي v9.4", type="primary", key="run_cv2"):
+        if st.button("🚀 v9.5 تشغيل المحرك الذكي (Strict)", type="primary", key="run_cv2"):
             if store_nm_col == NONE_V2:
                 st.error("حدد عمود اسم المنتج في ملف المتجر")
             elif comp_nm_col == NONE_V2:
