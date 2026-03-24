@@ -1782,7 +1782,6 @@ if st.session_state.page == "compare_v2":
             if not df_s.empty:
                 st.session_state.cv2_store_df = df_s
                 st.success(f"✅ {len(df_s):,} منتج في المتجر")
-                st.rerun()
 
     with cv2_c2:
         st.markdown("**ملفات المنافسين** — يمكن رفع أكثر من ملف")
@@ -1804,7 +1803,6 @@ if st.session_state.page == "compare_v2":
                 st.session_state.cv2_comp_dfs = new_dfs
                 total = sum(len(d) for d in new_dfs)
                 st.success(f"✅ {total:,} منتج من {len(new_dfs)} ملف")
-                st.rerun()
 
     with cv2_c3:
         st.markdown("**ملف الماركات** (اختياري)")
@@ -1821,10 +1819,22 @@ if st.session_state.page == "compare_v2":
             if not df_br.empty:
                 st.session_state.cv2_brands_df = df_br
                 st.success(f"✅ {len(df_br):,} ماركة")
-                st.rerun()
+
+    # ── مؤشر الحالة ──────────────────────────────────────────────
+    has_store = st.session_state.cv2_store_df is not None
+    has_comp  = bool(st.session_state.cv2_comp_dfs)
+    if has_store and not has_comp:
+        st.info("✅ ملف المتجر جاهز — الآن ارفع ملفات المنافسين للبدء")
+    elif not has_store and has_comp:
+        st.info("✅ ملفات المنافسين جاهزة — الآن ارفع ملف متجرنا للبدء")
+    elif not has_store and not has_comp:
+        st.markdown("""<div class="upload-zone"><div class="uz-icon">🔎</div>
+        <div class="uz-title">ارفع ملف متجرنا وملفات المنافسين للبدء</div>
+        <div class="uz-sub">المحرك الذكي v9.4 يستخدم 5 طبقات مقارنة: SKU + اسم نقي + حجم + تركيز + نوع</div>
+        </div>""", unsafe_allow_html=True)
 
     # ── إعدادات المحرك ───────────────────────────────────────────
-    if st.session_state.cv2_store_df is not None and st.session_state.cv2_comp_dfs:
+    if has_store and has_comp:
         store_df_v2 = st.session_state.cv2_store_df
         comp_dfs_v2 = st.session_state.cv2_comp_dfs
 
@@ -2026,14 +2036,7 @@ if st.session_state.page == "compare_v2":
             st.session_state.cv2_comp_dfs = []
             st.rerun()
 
-    elif st.session_state.cv2_store_df is None:
-        st.markdown("""
-        <div class="upload-zone">
-          <div class="uz-icon">🔎</div>
-          <div class="uz-title">ارفع ملف متجرنا وملفات المنافسين للبدء</div>
-          <div class="uz-sub">المحرك الذكي v9.4 يستخدم 5 طبقات مقارنة: SKU + اسم نقي + حجم + تركيز + نوع</div>
-        </div>
-        """, unsafe_allow_html=True)
+    # (empty zone now shown above via has_store/has_comp logic)
 
 # ╔══════════════════════════════════════════════════════════════════╗
 # ║  PAGE 3 — QUICK ADD                                             ║
