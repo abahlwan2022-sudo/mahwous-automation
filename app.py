@@ -223,13 +223,13 @@ div.stButton > button:hover { opacity: 0.88 !important; }
 # ║  SALLA EXACT SCHEMAS                                            ║
 # ╚══════════════════════════════════════════════════════════════════╝
 SALLA_COLS = [
-    "No.", "النوع ", "أسم المنتج", "تصنيف المنتج", "صورة المنتج",
+    "النوع ", "أسم المنتج", "تصنيف المنتج", "صورة المنتج",
     "وصف صورة المنتج", "نوع المنتج", "سعر المنتج", "الوصف",
     "هل يتطلب شحن؟", "رمز المنتج sku", "سعر التكلفة", "السعر المخفض",
     "تاريخ بداية التخفيض", "تاريخ نهاية التخفيض",
     "اقصي كمية لكل عميل", "إخفاء خيار تحديد الكمية",
     "اضافة صورة عند الطلب", "الوزن", "وحدة الوزن",
-    "حالة المنتج", "الماركة", "العنوان الترويجي", "تثبيت المنتج",
+    "الماركة", "العنوان الترويجي", "تثبيت المنتج",
     "الباركود", "السعرات الحرارية", "MPN", "GTIN",
     "خاضع للضريبة ؟", "سبب عدم الخضوع للضريبة",
     "[1] الاسم", "[1] النوع", "[1] القيمة", "[1] الصورة / اللون",
@@ -253,10 +253,13 @@ SALLA_PRICE_COLS = [
 
 # Salla brands file exact columns
 SALLA_BRANDS_COLS = [
-    "اسم العلامة التجارية",
+    "اسم الماركة",
+    "وصف مختصر عن الماركة",
+    "صورة شعار الماركة",
+    "(إختياري) صورة البانر",
+    "(Page Title) عنوان صفحة العلامة التجارية",
     "(SEO Page URL) رابط صفحة العلامة التجارية",
-    "وصف العلامة التجارية",
-    "صورة العلامة التجارية",
+    "(Page Description) وصف صفحة العلامة التجارية",
 ]
 
 # Editor shows these by default (rest hidden unless user selects)
@@ -401,6 +404,18 @@ def _init_state():
 
 _init_state()
 
+# تحديث وتوحيد مفاتيح الماركات الجديدة لتطابق صيغة ملف مهووس
+for b in st.session_state.new_brands:
+    if "اسم الماركة" not in b:
+        bn = b.pop("اسم العلامة التجارية", b.get("اسم الماركة", ""))
+        b["اسم الماركة"] = bn
+        b["وصف مختصر عن الماركة"] = b.pop("وصف العلامة التجارية", f"علامة تجارية متخصصة في العطور الفاخرة - {bn}")
+        b["صورة شعار الماركة"] = b.pop("صورة العلامة التجارية", "")
+        b["(إختياري) صورة البانر"] = ""
+        b["(Page Title) عنوان صفحة العلامة التجارية"] = f"عطور {bn} الأصلية | مهووس"
+        b["(SEO Page URL) رابط صفحة العلامة التجارية"] = b.pop("(SEO Page URL) رابط صفحة العلامة التجارية", to_slug(bn))
+        b["(Page Description) وصف صفحة العلامة التجارية"] = f"تسوّق أحدث عطور {bn} الأصلية. تشكيلة فاخرة تناسب ذوقك بأسعار حصرية من متجر مهووس."
+      
 # ╔══════════════════════════════════════════════════════════════════╗
 # ║  CORE UTILITIES                                                 ║
 # ╚══════════════════════════════════════════════════════════════════╝
@@ -941,28 +956,28 @@ def match_brand(name: str) -> dict:
 
 
 def generate_new_brand(brand_name: str) -> dict:
-    """Generate a new brand entry in Salla format using AI."""
+    """توليد ماركة بصيغة مهووس مع جلب الصور بالذكاء الاصطناعي."""
     key = st.session_state.api_key
     slug = to_slug(brand_name)
-    desc = ""
+    desc = f"علامة تجارية متخصصة في العطور الفاخرة - {brand_name}"
     if key:
         try:
             client = anthropic.Anthropic(api_key=key)
             msg = client.messages.create(
-                model="claude-opus-4-5",
-                max_tokens=300,
-                messages=[{"role": "user", "content":
-                    f"اكتب وصفاً موجزاً (50-80 كلمة) لعلامة العطور التجارية '{brand_name}' "
-                    f"بالعربية، بأسلوب فاخر ومهني. بدون رموز تعبيرية. نص فقط."}],
+                model="claude-3-haiku-20240307", max_tokens=250,
+                messages=[{"role": "user", "content": f"اكتب وصفاً جذاباً (50 كلمة) لماركة العطور '{brand_name}' لمتجر مهووس. بدون رموز تعبيرية."}]
             )
             desc = msg.content[0].text.strip()
-        except Exception:
-            desc = f"علامة تجارية عالمية متخصصة في صناعة العطور الفاخرة."
+        except Exception: pass
+    
     return {
-        "اسم العلامة التجارية":                           brand_name,
-        "(SEO Page URL) رابط صفحة العلامة التجارية":     slug,
-        "وصف العلامة التجارية":                          desc,
-        "صورة العلامة التجارية":                         "",
+        "اسم الماركة": brand_name,
+        "وصف مختصر عن الماركة": desc,
+        "صورة شعار الماركة": fetch_image(f"{brand_name} perfume brand logo"),
+        "(إختياري) صورة البانر": fetch_image(f"{brand_name} perfume brand banner"),
+        "(Page Title) عنوان صفحة العلامة التجارية": f"عطور {brand_name} الأصلية | مهووس",
+        "(SEO Page URL) رابط صفحة العلامة التجارية": slug,
+        "(Page Description) وصف صفحة العلامة التجارية": f"تسوّق أحدث عطور {brand_name} الأصلية الفاخرة بأسعار حصرية من متجر مهووس."
     }
 
 
@@ -3355,17 +3370,17 @@ elif st.session_state.page == "brands":
                 st.session_state.new_brands = []
                 st.rerun()
 
-        # Generate AI descriptions for brands without descriptions
+       # Generate AI descriptions for brands without descriptions
         no_desc_brands = [b for b in st.session_state.new_brands
-                          if not str(b.get("وصف العلامة التجارية","")).strip()]
+                          if not str(b.get("وصف مختصر عن الماركة","")).strip() or "متخصصة في العطور" in str(b.get("وصف مختصر عن الماركة",""))]
         if no_desc_brands and st.session_state.api_key:
-            if st.button(f"🤖 توليد أوصاف {len(no_desc_brands)} ماركة بدون وصف", key="gen_nb_desc"):
-                with st.spinner("توليد الأوصاف..."):
+            if st.button(f"🤖 جلب الصور وتوليد السيو لـ {len(no_desc_brands)} ماركة", key="gen_nb_desc"):
+                with st.spinner("جاري جلب الصور والبيانات..."):
                     for nb in st.session_state.new_brands:
-                        if not str(nb.get("وصف العلامة التجارية","")).strip():
-                            gen = generate_new_brand(nb["اسم العلامة التجارية"])
-                            nb["وصف العلامة التجارية"] = gen["وصف العلامة التجارية"]
-                st.success("✅ تم توليد الأوصاف")
+                        if not str(nb.get("وصف مختصر عن الماركة","")).strip() or "متخصصة في العطور" in str(nb.get("وصف مختصر عن الماركة","")):
+                            gen = generate_new_brand(nb["اسم الماركة"])
+                            nb.update(gen)
+                st.success("✅ تم تحديث بيانات الماركات بنجاح")
                 st.rerun()
 
 # ╔══════════════════════════════════════════════════════════════════╗
