@@ -883,134 +883,125 @@ st.markdown(f"""
 # ╚══════════════════════════════════════════════════════════════════╝
 if st.session_state.page == "processor":
 
-    # ── STEP A: Upload ────────────────────────────────────────────
-    st.markdown("""<div class="sec-title"><div class="bar"></div><h3>الخطوة 1 — رفع الملف</h3></div>""",
+    # ── STEP A & B: Upload & Auto-Process ─────────────────────────
+    st.markdown("""<div class="sec-title"><div class="bar"></div><h3>الخطوة 1 — رفع وتجهيز الملف تلقائياً</h3></div>""",
                 unsafe_allow_html=True)
 
-    uc1, uc2 = st.columns([4, 1])
-    with uc1:
-        up_file = st.file_uploader(
-            "ارفع أي ملف Excel أو CSV (من أي مصدر — ملفات سلة، موردين، قوائم أسماء...)",
-            type=["csv", "xlsx", "xls", "xlsm"],
-            label_visibility="collapsed",
-            key="proc_uploader",
-        )
-    with uc2:
-        is_salla_file = st.checkbox("ملف سلة\n(صفّان في الرأس)", value=False, key="is_salla")
+    st.markdown("""<div class="al-info">
+    ارفع ملف منتجات سلة (بصيغة CSV أو Excel). سيقوم النظام تلقائياً بالتعرف على الأعمدة، 
+    استكمال الماركات الناقصة، توليد الأوصاف، تحديد القسم، وإضافة الوزن والحجم.
+    </div>""", unsafe_allow_html=True)
+
+    up_file = st.file_uploader(
+        "ارفع ملف المنتجات هنا",
+        type=["csv", "xlsx", "xls", "xlsm"],
+        label_visibility="collapsed",
+        key="proc_uploader",
+    )
 
     if up_file:
-        df_raw = read_file(up_file, salla_2row=is_salla_file)
+        # Automatically assume it's a Salla file (2 rows header) for processing
+        df_raw = read_file(up_file, salla_2row=True)
+        
         if not df_raw.empty:
-            st.session_state.up_raw      = df_raw
+            st.session_state.up_raw = df_raw
             st.session_state.up_filename = up_file.name
-            st.session_state.up_mapped   = False
-            # If it's already a Salla file with enough columns, auto-map
-            if sum(1 for c in SALLA_COLS if c in df_raw.columns) >= 8:
-                full = pd.DataFrame(columns=SALLA_COLS)
-                for col in SALLA_COLS:
-                    full[col] = df_raw[col] if col in df_raw.columns else ""
-                st.session_state.up_df    = full
-                st.session_state.up_mapped = True
-            else:
-                st.session_state.up_df = None
-
-    # ── STEP B: Column Mapping ────────────────────────────────────
-    if st.session_state.up_raw is not None and not st.session_state.up_mapped:
-        raw = st.session_state.up_raw
-        st.markdown("""<hr class="gdiv"><div class="sec-title"><div class="bar"></div>
-        <h3>الخطوة 2 — تعيين الأعمدة</h3></div>""", unsafe_allow_html=True)
-
-        st.markdown(f"""<div class="al-info">
-        وجدت <b>{len(raw.columns)}</b> عمود و <b>{len(raw)}</b> صف.
-        حدد أي عمود يمثل كل حقل من حقول سلة:
-        </div>""", unsafe_allow_html=True)
-
-        with st.expander("👀 معاينة الملف الأصلي", expanded=True):
-            st.dataframe(raw.head(8), use_container_width=True)
-
-        NONE_OPT = "— لا يوجد —"
-        opts = [NONE_OPT] + list(raw.columns)
-
-        def gi(kws):
-            g = auto_guess_col(raw.columns, kws)
-            return opts.index(g) if g in opts else 0
-
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            col_name  = st.selectbox("اسم المنتج / العطر ⭐",  opts, index=gi(["اسم","name","منتج","عطر","product"]),  key="cm_nm")
-            col_price = st.selectbox("السعر",                   opts, index=gi(["سعر","price","cost"]),                 key="cm_pr")
-        with c2:
-            col_sku   = st.selectbox("رمز SKU",                 opts, index=gi(["sku","رمز","barcode","كود"]),          key="cm_sk")
-            col_size  = st.selectbox("الحجم",                   opts, index=gi(["حجم","size","مل","ml","volume"]),      key="cm_sz")
-        with c3:
-            col_img   = st.selectbox("رابط الصورة",             opts, index=gi(["صورة","image","img","photo","url"]),   key="cm_im")
-            col_desc  = st.selectbox("الوصف (إن وجد)",          opts, index=gi(["وصف","desc","description"]),           key="cm_de")
-
-        c4, c5, c6, c7 = st.columns(4)
-        with c4:
-            col_brand  = st.selectbox("الماركة (إن وجدت)",      opts, index=gi(["ماركة","brand","علامة"]),             key="cm_br")
-        with c5:
-            col_gender = st.selectbox("الجنس (إن وجد)",         opts, index=gi(["جنس","gender","sex"]),                 key="cm_gn")
-        with c6:
-            col_tester = st.selectbox("تستر/عادي (إن وجد)",    opts, index=gi(["تستر","tester","نوع","type"]),          key="cm_ts")
-        with c7:
-            col_weight = st.selectbox("الوزن (إن وجد)",         opts, index=gi(["وزن","weight"]),                       key="cm_wt")
-
-        st.markdown("**الإعدادات الافتراضية** (تُطبق عند غياب العمود المقابل):")
-        d1, d2, d3, d4, d5 = st.columns(5)
-        with d1: dft_gender = st.selectbox("الجنس",     ["للجنسين","للرجال","للنساء"],       key="dft_gn")
-        with d2: dft_size   = st.text_input("الحجم",    "100 مل",                             key="dft_sz")
-        with d3: dft_conc   = st.selectbox("التركيز",   ["أو دو بارفيوم","أو دو كولون","أو دو تواليت","بارفيوم"], key="dft_cn")
-        with d4: dft_type   = st.selectbox("النوع",     ["عطر عادي","تستر"],                  key="dft_tp")
-        with d5: dft_weight = st.text_input("الوزن (kg)","0.2",                               key="dft_wt")
-
-        if col_name == NONE_OPT:
-            st.warning("⚠️ يرجى تحديد عمود اسم المنتج على الأقل")
-        else:
-            if st.button("✅ تأكيد وتحويل الملف إلى تنسيق سلة", type="primary", key="map_btn"):
+            
+            with st.spinner("جاري تحليل وتجهيز الملف بالكامل..."):
                 rows_out = []
                 seo_out  = []
                 new_brands_found = []
-                for _, src in raw.iterrows():
+                
+                # Progress bar for processing
+                prog_bar = st.progress(0)
+                prog_text = st.empty()
+                
+                total_rows = len(df_raw)
+                
+                # Detect columns (fuzzy matching just in case)
+                cols = list(df_raw.columns)
+                col_name = auto_guess_col(cols, ["اسم","name","أسم المنتج"])
+                col_price = auto_guess_col(cols, ["سعر","price"])
+                col_sku = auto_guess_col(cols, ["sku","رمز"])
+                col_img = auto_guess_col(cols, ["صورة","image"])
+                col_desc = auto_guess_col(cols, ["وصف","desc"])
+                col_brand = auto_guess_col(cols, ["ماركة","brand"])
+                
+                for idx, src in df_raw.iterrows():
+                    prog_bar.progress(int((idx + 1) / total_rows * 100))
+                    
                     def gv(col):
-                        if col == NONE_OPT or col not in raw.columns:
+                        if col == "— لا يوجد —" or col not in df_raw.columns:
                             return ""
                         return str(src.get(col, "") or "").strip()
 
                     name = gv(col_name)
                     if not name or name.lower() in ("nan", "none", ""):
                         continue
+                        
+                    prog_text.text(f"جاري معالجة: {name[:40]}...")
 
                     price     = gv(col_price)
                     sku       = gv(col_sku)
                     img       = gv(col_img)
                     desc      = gv(col_desc)
-                    size      = gv(col_size) or dft_size
-                    gender    = gv(col_gender) or dft_gender
                     brand_raw = gv(col_brand)
-                    tester_v  = gv(col_tester)
-                    weight    = gv(col_weight) or dft_weight
+                    
+                    is_test = "تستر" in name.lower() or "tester" in name.lower()
+                    
+                    # Auto-extract size, conc, gender from name
+                    size_m = re.search(r"\d+\s*(?:مل|ml)", name, re.I)
+                    size   = size_m.group() if size_m else "100 مل"
+                    
+                    gender = "للجنسين"
+                    if any(w in name.lower() for w in ["نسائ","women","للنساء"]): gender = "للنساء"
+                    elif any(w in name.lower() for w in ["رجال","men","للرجال"]): gender = "للرجال"
+                    
+                    conc = "أو دو بارفيوم"
+                    if "تواليت" in name.lower() or "toilette" in name.lower(): conc = "أو دو تواليت"
+                    elif "كولون" in name.lower() or "cologne" in name.lower(): conc = "أو دو كولون"
+                    elif "بارفيوم" in name.lower() or "parfum" in name.lower(): conc = "بارفيوم"
 
-                    is_test = any(w in tester_v.lower()
-                                  for w in ["تستر","tester","yes","نعم"]) \
-                              if col_tester != NONE_OPT else (dft_type == "تستر")
-
-                    brand = match_brand(name) if not brand_raw else \
-                               {"name": brand_raw, "page_url": ""}
-
-                    # If brand not found in database → generate new brand
-                    if not brand.get("name") and brand_raw:
+                    # Brand logic
+                    brand = match_brand(name)
+                    if not brand.get("name"):
+                        if brand_raw and brand_raw != 'nan':
+                            b_name = brand_raw
+                        else:
+                            # Guess brand from first two words
+                            words = name.split()
+                            b_name = " ".join(words[:2]) if len(words) >= 2 else name
+                            
+                        brand = {"name": b_name, "page_url": to_slug(b_name)}
+                        
                         existing_new = [b["اسم العلامة التجارية"] for b in st.session_state.new_brands]
-                        if brand_raw not in existing_new and brand_raw not in new_brands_found:
-                            new_brands_found.append(brand_raw)
-                        brand = {"name": brand_raw, "page_url": to_slug(brand_raw)}
+                        if b_name not in existing_new and b_name not in new_brands_found:
+                            new_brands_found.append(b_name)
 
-                    cat      = match_category(name, gender)
-                    seo      = gen_seo(name, brand, size, is_test, gender)
+                    cat = match_category(name, gender)
+                    if is_test:
+                        cat = "العطور > تستر"
+                        
+                    seo = gen_seo(name, brand, size, is_test, gender)
+                    
+                    # Generate Mock AI Description if empty
+                    if not desc or desc == 'nan':
+                        desc = f"""<div style="direction:rtl; text-align:right;">
+  <h2>{name}</h2>
+  <p>عطر فاخر من دار <strong>{brand['name']}</strong>. يتميز بتركيبة فريدة وثبات عالي.</p>
+  <ul>
+    <li><strong>الماركة:</strong> {brand['name']}</li>
+    <li><strong>النوع:</strong> {'تستر' if is_test else 'عطر'}</li>
+    <li><strong>الحجم:</strong> {size}</li>
+    <li><strong>التركيز:</strong> {conc}</li>
+    <li><strong>الجنس:</strong> {gender}</li>
+  </ul>
+  <p><em>احصل عليه الآن من مهووس العطور بأفضل الأسعار.</em></p>
+</div>"""
 
                     nr = fill_row(name=name, price=price, sku=sku, image=img,
                                   desc=desc, brand=brand, category=cat, seo=seo,
-                                  weight=weight)
+                                  weight="0.2")
                     rows_out.append(nr)
                     seo_out.append({
                         "No. (غير قابل للتعديل)":            nr["No."],
@@ -1026,16 +1017,21 @@ if st.session_state.page == "processor":
 
                 # Add new brands to session
                 if new_brands_found:
-                    st.info(f"🆕 تم اكتشاف {len(new_brands_found)} ماركة جديدة — يمكن تصديرها من صفحة الإعدادات")
                     for bn in new_brands_found:
                         st.session_state.new_brands.append({
                             "اسم العلامة التجارية": bn,
                             "(SEO Page URL) رابط صفحة العلامة التجارية": to_slug(bn),
-                            "وصف العلامة التجارية": "",
+                            "وصف العلامة التجارية": f"علامة تجارية متخصصة في العطور الفاخرة - {bn}",
                             "صورة العلامة التجارية": "",
                         })
 
-                st.success(f"✅ تم تحويل {len(rows_out)} صف إلى تنسيق سلة بنجاح!")
+                prog_text.empty()
+                st.success(f"✅ تم تجهيز {len(rows_out)} منتج بالكامل بنجاح!")
+                if new_brands_found:
+                    st.info(f"🆕 تم استخراج {len(new_brands_found)} ماركة جديدة.")
+                
+                # Auto-rerun to show toolbox
+                time.sleep(1)
                 st.rerun()
 
     # ── STEP C: Toolbox + Editor ──────────────────────────────────
@@ -1716,7 +1712,7 @@ elif st.session_state.page == "quickadd":
 # ╔══════════════════════════════════════════════════════════════════╗
 # ║  PAGE 4 — COMPARE & DEDUP (NEW)                                 ║
 # ╚══════════════════════════════════════════════════════════════════╝
-
+elif st.session_state.page == "compare":
 
     st.markdown("""<div class="al-info">
     ارفع ملف المنتجات الجديدة (المُعالج) وملف المتجر الأساسي. سيقارن النظام المنتجات
