@@ -824,6 +824,156 @@ def fetch_image(name: str, tester: bool = False) -> str:
         return ""
 
 
+def scrape_product_url(url: str) -> dict:
+    """سحب بيانات المنتج من رابط URL مع التعامل مع Cloudflare وغيره.
+    يعيد dict يحتوي على: name, price, image, images, desc, brand_hint
+    """
+    result = {"name": "", "price": "", "image": "", "images": [], "desc": "", "brand_hint": "", "error": ""}
+    try:
+        from bs4 import BeautifulSoup
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                          "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+            "Accept-Language": "ar,en-US;q=0.9,en;q=0.8",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Connection": "keep-alive",
+            "Upgrade-Insecure-Requests": "1",
+        }
+        resp = requests.get(url, headers=headers, timeout=20, allow_redirects=True)
+        if resp.status_code != 200:
+            result["error"] = f"خطأ HTTP {resp.status_code}"
+            return result
+        soup = BeautifulSoup(resp.text, "html.parser")
+
+        # ── Extract Name ──────────────────────────────────────────────
+        name = ""
+        # Try og:title first
+        og_title = soup.find("meta", property="og:title")
+        if og_title and og_title.get("content"):
+            name = og_title["content"].strip()
+        if not name:
+            h1 = soup.find("h1")
+            if h1:
+                name = h1.get_text(" ", strip=True)
+        if not name:
+            title_tag = soup.find("title")
+            if title_tag:
+                name = title_tag.get_text(strip=True).split("|")[0].split("-")[0].strip()
+        result["name"] = name[:200] if name else ""
+
+        # ── Extract Price ─────────────────────────────────────────────
+        price = ""
+        # Try structured data (JSON-LD)
+        for script in soup.find_all("script", type="application/ld+json"):
+            try:
+                data = json.loads(script.string or "{}")
+                if isinstance(data, list):
+                    data = data[0]
+                offers = data.get("offers", data.get("Offers", {}))
+                if isinstance(offers, list):
+                    offers = offers[0]
+                p = offers.get("price", "")
+                if p:
+                    price = str(p)
+                    break
+            except Exception:
+                pass
+        if not price:
+            # Try og:price
+            og_price = soup.find("meta", property="product:price:amount")
+            if og_price and og_price.get("content"):
+                price = og_price["content"]
+        if not price:
+            # Try common price selectors
+            for sel in [".price", "[class*='price']", "[itemprop='price']", ".product-price"]:
+                el = soup.select_one(sel)
+                if el:
+                    txt = el.get_text(strip=True)
+                    nums = re.findall(r'[\d,\.]+', txt)
+                    if nums:
+                        price = nums[0].replace(",", "")
+                        break
+        result["price"] = price
+
+        # ── Extract Images ────────────────────────────────────────────
+        images = []
+        og_img = soup.find("meta", property="og:image")
+        if og_img and og_img.get("content"):
+            images.append(og_img["content"])
+        # Try JSON-LD images
+        for script in soup.find_all("script", type="application/ld+json"):
+            try:
+                data = json.loads(script.string or "{}")
+                if isinstance(data, list):
+                    data = data[0]
+                imgs = data.get("image", [])
+                if isinstance(imgs, str):
+                    imgs = [imgs]
+                for img in imgs[:5]:
+                    if img and img not in images:
+                        images.append(img)
+            except Exception:
+                pass
+        # Try product gallery images
+        for img_tag in soup.select("img[src]"):
+            src = img_tag.get("src", "")
+            if any(kw in src.lower() for kw in ["product", "item", "shop", "catalog", "perfume", "bottle"]):
+                if src.startswith("http") and src not in images:
+                    images.append(src)
+                    if len(images) >= 6:
+                        break
+        result["image"] = images[0] if images else ""
+        result["images"] = images[:6]
+
+        # ── Extract Description ───────────────────────────────────────
+        desc = ""
+        og_desc = soup.find("meta", property="og:description")
+        if og_desc and og_desc.get("content"):
+            desc = og_desc["content"].strip()
+        if not desc:
+            meta_desc = soup.find("meta", attrs={"name": "description"})
+            if meta_desc and meta_desc.get("content"):
+                desc = meta_desc["content"].strip()
+        if not desc:
+            for sel in [".product-description", "[class*='description']", "[itemprop='description']"]:
+                el = soup.select_one(sel)
+                if el:
+                    desc = el.get_text(" ", strip=True)[:500]
+                    break
+        result["desc"] = desc[:500] if desc else ""
+
+        # ── Extract Brand Hint ────────────────────────────────────────
+        brand_hint = ""
+        og_brand = soup.find("meta", property="product:brand")
+        if og_brand and og_brand.get("content"):
+            brand_hint = og_brand["content"]
+        if not brand_hint:
+            for script in soup.find_all("script", type="application/ld+json"):
+                try:
+                    data = json.loads(script.string or "{}")
+                    if isinstance(data, list):
+                        data = data[0]
+                    b = data.get("brand", {})
+                    if isinstance(b, dict):
+                        brand_hint = b.get("name", "")
+                    elif isinstance(b, str):
+                        brand_hint = b
+                    if brand_hint:
+                        break
+                except Exception:
+                    pass
+        result["brand_hint"] = brand_hint
+
+    except requests.exceptions.Timeout:
+        result["error"] = "انتهت مهلة الاتصال (timeout)"
+    except requests.exceptions.ConnectionError:
+        result["error"] = "تعذّر الاتصال بالموقع"
+    except Exception as e:
+        result["error"] = f"خطأ: {str(e)[:100]}"
+    return result
+
+
 def ai_generate(name: str, tester: bool, brand: dict,
                 size: str, gender: str, conc: str) -> str:
     key = st.session_state.api_key
@@ -2044,43 +2194,153 @@ if st.session_state.page == "compare_v2":
 elif st.session_state.page == "quickadd":
 
     st.markdown("""<div class="al-info">
-    أضف منتجات جديدة بسرعة بطريقتين: (1) من خلال رابط منتج، أو (2) بإدخال يدوي سريع مع رفع صور.
+    أضف منتجات جديدة بسرعة بطريقتين: (1) من خلال رابط منتج أو أكثر، أو (2) بإدخال يدوي سريع مع رفع صور.
     </div>""", unsafe_allow_html=True)
 
     tab1, tab2 = st.tabs(["🔗 سحب من رابط", "📝 إدخال يدوي ورفع صور"])
 
-    # ── TAB 1: Fetch from URL ────────────────────────────────────
+    # ── TAB 1: Fetch from URLs (multiple) ───────────────────────
     with tab1:
-        st.markdown("### سحب بيانات المنتج من رابط")
-        qa_url = st.text_input("رابط المنتج", placeholder="https://example.com/product/...")
-        
-        if st.button("🔄 سحب البيانات", type="primary", key="qa_fetch_url"):
-            if not qa_url.strip():
-                st.error("الرجاء إدخال رابط منتج")
+        st.markdown("### سحب بيانات المنتجات من روابط")
+        st.caption("أدخل رابطاً واحداً أو أكثر — كل رابط في سطر منفصل")
+
+        # Initialize URL list in session state
+        if "qa_url_list" not in st.session_state:
+            st.session_state.qa_url_list = [""]
+
+        # Dynamic URL inputs
+        urls_to_remove = []
+        for idx, url_val in enumerate(st.session_state.qa_url_list):
+            col_url, col_del = st.columns([10, 1])
+            with col_url:
+                new_val = st.text_input(
+                    f"رابط المنتج {idx + 1}",
+                    value=url_val,
+                    placeholder="https://example.com/product/...",
+                    key=f"qa_url_{idx}",
+                    label_visibility="collapsed",
+                )
+                st.session_state.qa_url_list[idx] = new_val
+            with col_del:
+                if len(st.session_state.qa_url_list) > 1:
+                    if st.button("✕", key=f"del_url_{idx}", help="حذف هذا الرابط"):
+                        urls_to_remove.append(idx)
+
+        for idx in reversed(urls_to_remove):
+            st.session_state.qa_url_list.pop(idx)
+            st.rerun()
+
+        col_add, col_fetch = st.columns([1, 3])
+        with col_add:
+            if st.button("➕ إضافة رابط آخر", use_container_width=True):
+                st.session_state.qa_url_list.append("")
+                st.rerun()
+        with col_fetch:
+            do_fetch = st.button("🔄 سحب البيانات من الروابط", type="primary",
+                                 use_container_width=True, key="qa_fetch_urls")
+
+        # Options for URL scraping
+        uo1, uo2 = st.columns(2)
+        with uo1:
+            qa_url_gen_desc = st.checkbox("🤖 توليد وصف AI لكل منتج", value=True, key="qa_url_gen_desc")
+        with uo2:
+            qa_url_gen_seo = st.checkbox("🔍 توليد SEO", value=True, key="qa_url_gen_seo")
+
+        if do_fetch:
+            valid_urls = [u.strip() for u in st.session_state.qa_url_list if u.strip()]
+            if not valid_urls:
+                st.error("الرجاء إدخال رابط منتج واحد على الأقل")
             else:
-                with st.spinner("جاري سحب وتحليل البيانات..."):
-                    import time
-                    time.sleep(1.5)
-                    
-                    # Mock extracting data from URL
-                    extracted_name = "عطر مسحوب من الرابط 100 مل"
-                    extracted_price = "250"
-                    extracted_img = "https://cdn.salla.sa/example.png"
-                    extracted_desc = "وصف مستخرج من الرابط..."
-                    
-                    brand  = match_brand(extracted_name)
-                    cat    = match_category(extracted_name, "للجنسين")
-                    seo    = gen_seo(extracted_name, brand, "100 مل", False, "للجنسين")
-                    
-                    nr = fill_row(name=extracted_name, price=extracted_price, image=extracted_img,
-                                  desc=extracted_desc, brand=brand, category=cat, seo=seo, weight="0.2")
-                                  
+                progress_bar = st.progress(0, text="جاري السحب...")
+                success_count = 0
+                for url_i, url_item in enumerate(valid_urls):
+                    progress_bar.progress(
+                        int((url_i / len(valid_urls)) * 100),
+                        text=f"جاري سحب المنتج {url_i + 1} من {len(valid_urls)}: {url_item[:60]}..."
+                    )
+                    with st.spinner(f"سحب: {url_item[:80]}..."):
+                        scraped = scrape_product_url(url_item)
+
+                    if scraped.get("error"):
+                        st.warning(f"⚠️ تعذّر سحب {url_item[:60]}: {scraped['error']}")
+                        continue
+
+                    ex_name  = scraped.get("name", "") or "منتج جديد"
+                    ex_price = scraped.get("price", "") or ""
+                    ex_img   = scraped.get("image", "") or ""
+                    ex_imgs  = scraped.get("images", [])
+                    ex_desc  = scraped.get("desc", "") or ""
+                    ex_brand_hint = scraped.get("brand_hint", "") or ""
+
+                    # Show preview card
+                    with st.expander(f"📦 {ex_name[:80]}", expanded=True):
+                        pc1, pc2 = st.columns([1, 3])
+                        with pc1:
+                            if ex_img:
+                                st.image(ex_img, width=120, caption="الصورة الرئيسية")
+                            if len(ex_imgs) > 1:
+                                st.caption(f"📷 {len(ex_imgs)} صور متاحة")
+                                thumb_cols = st.columns(min(len(ex_imgs), 4))
+                                for ti, timg in enumerate(ex_imgs[:4]):
+                                    with thumb_cols[ti]:
+                                        try:
+                                            st.image(timg, width=60)
+                                        except Exception:
+                                            pass
+                        with pc2:
+                            st.markdown(f"**الاسم:** {ex_name}")
+                            st.markdown(f"**السعر:** {ex_price} ريال" if ex_price else "**السعر:** غير محدد")
+                            st.markdown(f"**الماركة المكتشفة:** {ex_brand_hint}" if ex_brand_hint else "")
+                            st.caption(f"**الوصف:** {ex_desc[:200]}..." if len(ex_desc) > 200 else f"**الوصف:** {ex_desc}")
+
+                    # Match brand
+                    if ex_brand_hint:
+                        brand = match_brand(ex_brand_hint)
+                        if not brand.get("name"):
+                            brand = generate_new_brand(ex_brand_hint)
+                            existing_b = [b.get("اسم العلامة التجارية", "") for b in st.session_state.new_brands]
+                            if ex_brand_hint not in existing_b:
+                                st.session_state.new_brands.append({
+                                    "اسم العلامة التجارية": brand.get("name", ex_brand_hint),
+                                    "(SEO Page URL) رابط صفحة العلامة التجارية": brand.get("page_url", to_slug(ex_brand_hint)),
+                                    "وصف العلامة التجارية": brand.get("desc", ""),
+                                    "صورة العلامة التجارية": "",
+                                })
+                    else:
+                        brand = match_brand(ex_name)
+
+                    cat = match_category(ex_name, "للجنسين")
+
+                    # Extract size from name
+                    size_match = re.search(r'(\d+)\s*(?:ml|مل|ML)', ex_name, re.IGNORECASE)
+                    ex_size = size_match.group(0) if size_match else "100 مل"
+
+                    seo = gen_seo(ex_name, brand, ex_size, False, "للجنسين") if qa_url_gen_seo else {"url": "", "title": "", "desc": ""}
+
+                    # Generate AI description
+                    if qa_url_gen_desc and st.session_state.api_key:
+                        final_desc = ai_generate(ex_name, False, brand, ex_size, "للجنسين", "أو دو بارفيوم")
+                    else:
+                        final_desc = f"<p>{ex_desc}</p>" if ex_desc else f"<p>وصف مبدئي لـ {ex_name}</p>"
+
+                    nr = fill_row(
+                        name=ex_name, price=ex_price, image=ex_img,
+                        desc=final_desc, brand=brand, category=cat,
+                        seo=seo, weight="0.2"
+                    )
                     st.session_state.qa_rows.append({
                         "product": nr,
                         "seo": {"url": seo["url"], "title": seo["title"], "desc": seo["desc"]},
+                        "images": ex_imgs,
                     })
-                st.success(f"✅ تم سحب المنتج بنجاح!")
-                st.rerun()
+                    success_count += 1
+
+                progress_bar.progress(100, text="اكتمل السحب!")
+                if success_count:
+                    st.success(f"✅ تم سحب {success_count} منتج بنجاح!")
+                    # Reset URL list
+                    st.session_state.qa_url_list = [""]
+                    st.rerun()
 
     # ── TAB 2: Manual Entry with Image Upload ────────────────────
     with tab2:
