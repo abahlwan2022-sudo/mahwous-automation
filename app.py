@@ -16,12 +16,17 @@ from openpyxl import Workbook, load_workbook
 from openpyxl.styles import (Font, PatternFill, Alignment,
                               Border, Side, GradientFill)
 from openpyxl.utils import get_column_letter
-import anthropic
 try:
     from rapidfuzz import process as rf_process, fuzz as rf_fuzz
     HAS_RAPIDFUZZ = True
 except ImportError:
     HAS_RAPIDFUZZ = False
+
+try:
+    import anthropic
+    HAS_ANTHROPIC = True
+except ImportError:
+    HAS_ANTHROPIC = False
 
 # ╔══════════════════════════════════════════════════════════════════╗
 # ║  PAGE CONFIG                                                    ║
