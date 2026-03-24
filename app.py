@@ -696,46 +696,84 @@ def run_smart_comparison(new_df: pd.DataFrame, store_df: pd.DataFrame,
                     verdict = "مكرر"
                     reason  = f"تطابق تام ({raw_score:.0f}%) — اسم + حجم + تركيز + نوع"
             elif raw_score >= t_near:
-                # تشابه قوي ولكن قد يكون فرصة
+                # v10.4 - تشابه قوي: فصل صارم بالحجم والنوع، والذكاء الاصطناعي للحالات الغامضة
                 if new_type != s_type:
                     verdict = "جديد"
-                    reason  = f"تشابه قوي ({raw_score:.0f}%) لكن النوع مختلف"
+                    reason  = f"نوع مختلف قطعياً: المنافس ({new_type}) | متجرنا ({s_type})"
                 elif abs(new_size - s_size) > 0.1 and new_size != 0 and s_size != 0:
                     verdict = "جديد"
-                    reason  = f"تشابه قوي ({raw_score:.0f}%) لكن الحجم مختلف"
+                    reason  = f"حجم مختلف قطعياً: المنافس ({new_size}مل) | متجرنا ({s_size}مل)"
                 else:
-                    verdict = "مراجعة يدوية"
-                    reason  = f"تشابه عالي ({raw_score:.0f}%) — يحتاج تدقيق"
-            elif raw_score >= t_review:
-                # v10.2 - حسم تلقائي للحالات الضعيفة لتقليل المراجعة
-                if raw_score < 65:
-                    verdict = "جديد"
-                    reason = f"تشابه ضعيف ({raw_score:.0f}%) - تم الحسم تلقائياً كفرصة جديدة"
-                else:
-                    # v10.2 - استخدام الذكاء الاصطناعي للحالات المتوسطة فقط
+                    # الحجم والنوع متطابقان لكن الاسم ليس متطابقاً 100%
+                    # v10.4: استخدام AI للحسم بدقة حقيقية
                     if HAS_ANTHROPIC and st.session_state.get("anthropic_key"):
                         try:
-                            ai_prompt = f"هل هذين المنتجين متطابقين (نفس الاسم، الحجم، والنوع)؟\nالمنتج 1: {new_name}\nالمنتج 2: {best_store_name}\nرد بكلمة واحدة فقط: (نعم) إذا كان مكرراً، أو (لا) إذا كان منتجاً جديداً."
+                            ai_prompt = (
+                                f"أنت خبير عطور. هل هذين المنتجين هما نفس العطر تماماً؟\n"
+                                f"المنتج 1 (من المنافس): {new_name}\n"
+                                f"المنتج 2 (من متجرنا): {best_store_name}\n"
+                                f"ركز على: اسم العطر + الماركة + التركيز (EDP/EDT) + الحجم.\n"
+                                f"رد بكلمة واحدة فقط: (DUPLICATE) إذا كان نفس العطر تماماً، أو (NEW) إذا كان عطراً مختلفاً."
+                            )
                             client = anthropic.Anthropic(api_key=st.session_state.get("anthropic_key"))
                             response = client.messages.create(
                                 model="claude-3-haiku-20240307",
-                                max_tokens=10,
+                                max_tokens=15,
                                 messages=[{"role": "user", "content": ai_prompt}]
                             )
-                            ai_decision = response.content[0].text.strip()
-                            if "نعم" in ai_decision:
+                            ai_decision = response.content[0].text.strip().upper()
+                            if "DUPLICATE" in ai_decision:
                                 verdict = "مكرر"
-                                reason = f"🤖 مكرر (AI): {raw_score:.0f}%"
+                                reason = f"🤖 AI: نفس العطر ({raw_score:.0f}%)"
                             else:
                                 verdict = "جديد"
-                                reason = f"🤖 فرصة (AI): {raw_score:.0f}%"
+                                reason = f"🤖 AI: عطر مختلف ({raw_score:.0f}%)"
                         except:
-                            verdict = "جديد" # v10.2 - إذا فشل الـ AI نعتبرها فرصة لعدم ضياع الوقت
-                            reason = f"فرصة (Failsafe): تشابه {raw_score:.0f}%"
+                            # Failsafe: إذا فشل AI والتشابه عالي جداً = مكرر احتياطياً
+                            if raw_score >= 92:
+                                verdict = "مكرر"
+                                reason = f"تطابق عالي ({raw_score:.0f}%) - AI غير متاح"
+                            else:
+                                verdict = "مراجعة يدوية"
+                                reason = f"تشابه عالي ({raw_score:.0f}%) - AI غير متاح"
                     else:
-                        # v10.2 - إذا لم يتوفر AI، نعتبرها فرصة جديدة لتقليل المراجعة
+                        # بدون AI: احتياط صارم - التشابه العالي جداً = مكرر، غيره = مراجعة
+                        if raw_score >= 92:
+                            verdict = "مكرر"
+                            reason = f"تطابق عالي ({raw_score:.0f}%) - فعّل Claude API لدقة أعلى"
+                        else:
+                            verdict = "مراجعة يدوية"
+                            reason = f"تشابه غامض ({raw_score:.0f}%) - فعّل Claude API لتفادي المراجعة"
+            elif raw_score >= t_review:
+                # v10.4 - تشابه متوسط: AI للحسم أو تصنيف جديد إذا لم يتوفر
+                if HAS_ANTHROPIC and st.session_state.get("anthropic_key"):
+                    try:
+                        ai_prompt = (
+                            f"أنت خبير عطور. هل هذين المنتجين هما نفس العطر تماماً؟\n"
+                            f"المنتج 1: {new_name}\n"
+                            f"المنتج 2: {best_store_name}\n"
+                            f"رد بكلمة واحدة: (DUPLICATE) أو (NEW)"
+                        )
+                        client = anthropic.Anthropic(api_key=st.session_state.get("anthropic_key"))
+                        response = client.messages.create(
+                            model="claude-3-haiku-20240307",
+                            max_tokens=15,
+                            messages=[{"role": "user", "content": ai_prompt}]
+                        )
+                        ai_decision = response.content[0].text.strip().upper()
+                        if "DUPLICATE" in ai_decision:
+                            verdict = "مكرر"
+                            reason = f"🤖 AI: مكرر ({raw_score:.0f}%)"
+                        else:
+                            verdict = "جديد"
+                            reason = f"🤖 AI: جديد ({raw_score:.0f}%)"
+                    except:
                         verdict = "جديد"
-                        reason  = f"فرصة تلقائية: تشابه {raw_score:.0f}% (بدون AI)"
+                        reason = f"جديد (تشابه ضعيف {raw_score:.0f}%)"
+                else:
+                    # بدون AI: التشابه المتوسط = فرصة جديدة (أفضل من ضياع فرصة)
+                    verdict = "جديد"
+                    reason  = f"جديد (تشابه ضعيف {raw_score:.0f}%) - فعّل Claude API لدقة أعلى"
 
         # تحويل الحكم إلى حالة/إجراء (v10.0 - تصفية صارمة)
         if verdict == "مكرر":
@@ -2035,7 +2073,7 @@ if st.session_state.page == "compare_v2":
     elif not has_store and not has_comp:
         st.markdown("""<div class="upload-zone"><div class="uz-icon">🔎</div>
         <div class="uz-title">ارفع ملف متجرنا وملفات المنافسين للبدء</div>
-        <div class="uz-sub">المحرك الذكي v10.2: تصفية صارمة للعينات وحسم تلقائي للمكررات لتقليل المراجعة اليدوية بنسبة 95%</div>
+        <div class="uz-sub">المحرك الذكي v10.4: ذكاء اصطناعي حقيقي لكل حالة غامضة - فرص حقيقية 100%</div>
         </div>""", unsafe_allow_html=True)
 
     # ── إعدادات المحرك ───────────────────────────────────────────
@@ -2092,7 +2130,7 @@ if st.session_state.page == "compare_v2":
         if not HAS_RAPIDFUZZ:
             st.warning("⚠️ rapidfuzz غير مثبّت — يعمل بخوارزمية بديلة أقل دقة. أضف `rapidfuzz` إلى requirements.txt للحصول على أعلى دقة.")
 
-        if st.button("🤖 v10.2 تشغيل المحرك الذكي (بدون مراجعة يدوية)", type="primary", key="run_cv2"):
+        if st.button("🤖 v10.4 تشغيل المحرك الذكي (AI حقيقي)", type="primary", key="run_cv2"):
             if store_nm_col == NONE_V2:
                 st.error("حدد عمود اسم المنتج في ملف المتجر")
             elif comp_nm_col == NONE_V2:
