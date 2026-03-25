@@ -1825,8 +1825,8 @@ if st.session_state.page == "pipeline":
             store_br = auto_guess_col(store_df_p.columns, ["ماركة","brand"])
             comp_nm  = (auto_guess_col(comp_merged.columns,
                                         ["أسم المنتج","اسم","name","منتج"]) or comp_merged.columns[0])
-            comp_img = auto_guess_col(comp_merged.columns, ["صورة","image","src","img"])
-            comp_pr  = auto_guess_col(comp_merged.columns, ["سعر","price"])
+            comp_img = auto_guess_col(comp_merged.columns, ["صورة","image","src","img","w-full src"])
+            comp_pr  = auto_guess_col(comp_merged.columns, ["سعر","price","text-sm-2","text-sm","amount"])
             NONE_P   = "— لا يوجد —"
             store_sk  = store_sk if store_sk != NONE_P else None
             store_br  = store_br if store_br != NONE_P else None
@@ -1942,6 +1942,21 @@ if st.session_state.page == "pipeline":
                     brand_d = match_brand(prow_brand)
 
                 is_new_generated = False
+
+                # FALLBACK: استخراج الماركة من اسم المنتج عند غيابها في العمود
+                if not brand_d.get("name") and not prow_brand:
+                    words = pname.split()
+                    possible_brand = ""
+                    for w in words:
+                        cl = clean_brand_name(w)
+                        if cl:
+                            possible_brand = cl
+                            break
+                    if possible_brand:
+                        brand_d = match_brand(possible_brand)
+                        if not brand_d.get("name"):
+                            prow_brand = possible_brand
+
                 if not brand_d.get("name") and prow_brand:
                     brand_d = generate_new_brand(prow_brand)
                     is_new_generated = True
