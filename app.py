@@ -1030,6 +1030,23 @@ def ai_filter_suspects(suspects_df: pd.DataFrame, store_names: list,
 
 
 
+def clean_brand_name(brand_raw: str) -> str:
+    """تنظيف الماركة من الكلمات الخاطئة والأطوال غير المنطقية"""
+    if not brand_raw:
+        return ""
+    b = str(brand_raw).strip()
+    if len(b.split()) > 3 or len(b) <= 2:
+        return ""
+    bad_words = [
+        "تستر","عطر","شامبو","بلسم","لوشن","مقوي","مسكرة","حقيبة",
+        "بخاخ","كريم","زيت","صابون","جل","معطر","بودي","مجموعة",
+        "طقم","عينة","سمبل","tester","perfume","منتج","ميني","mini",
+    ]
+    if any(w in b.lower() for w in bad_words):
+        return ""
+    return b
+
+
 def match_brand(name: str) -> dict:
     bdf = st.session_state.brands_df
     if bdf is None or not str(name).strip():
@@ -1050,28 +1067,44 @@ def match_brand(name: str) -> dict:
 
 
 def generate_new_brand(brand_name: str) -> dict:
-    """توليد ماركة بصيغة مهووس مع جلب الصور بالذكاء الاصطناعي."""
+    """توليد ماركة بصيغة مهووس مع الترجمة وجلب الصور بالذكاء الاصطناعي."""
     key = st.session_state.api_key
-    slug = to_slug(brand_name)
-    desc = f"علامة تجارية متخصصة في العطور الفاخرة - {brand_name}"
+    formatted_name = brand_name
+    en_name        = brand_name
+    desc           = f"علامة تجارية متخصصة في العطور الفاخرة - {brand_name}"
+
     if key:
         try:
             client = anthropic.Anthropic(api_key=key)
+            prompt = (
+                f"للماركة '{brand_name}'، أعطني JSON فقط بدون أي نص: "
+                '{"formatted_name": "الاسم بالعربي | الاسم بالانجليزي", '
+                '"en_name": "English name only", '
+                '"desc": "وصف جذاب 30 كلمة لمتجر مهووس"}'
+            )
             msg = client.messages.create(
                 model="claude-3-haiku-20240307", max_tokens=250,
-                messages=[{"role": "user", "content": f"اكتب وصفاً جذاباً (50 كلمة) لماركة العطور '{brand_name}' لمتجر مهووس. بدون رموز تعبيرية."}]
+                messages=[{"role": "user", "content": prompt}]
             )
-            desc = msg.content[0].text.strip()
-        except Exception: pass
-    
+            raw = msg.content[0].text.strip()
+            import json as _json
+            m = re.search(r'\{[\s\S]*\}', raw)
+            if m:
+                data = _json.loads(m.group())
+                formatted_name = data.get("formatted_name", brand_name)
+                en_name        = data.get("en_name", brand_name)
+                desc           = data.get("desc", desc)
+        except Exception:
+            pass
+
     return {
-        "اسم الماركة": brand_name,
-        "وصف مختصر عن الماركة": desc,
-        "صورة شعار الماركة": fetch_image(f"{brand_name} perfume brand logo"),
-        "(إختياري) صورة البانر": fetch_image(f"{brand_name} perfume brand banner"),
-        "(Page Title) عنوان صفحة العلامة التجارية": f"عطور {brand_name} الأصلية | مهووس",
-        "(SEO Page URL) رابط صفحة العلامة التجارية": slug,
-        "(Page Description) وصف صفحة العلامة التجارية": f"تسوّق أحدث عطور {brand_name} الأصلية الفاخرة بأسعار حصرية من متجر مهووس."
+        "اسم الماركة":                                   formatted_name,
+        "وصف مختصر عن الماركة":                         desc,
+        "صورة شعار الماركة":                            fetch_image(f"{en_name} brand logo perfume"),
+        "(إختياري) صورة البانر":                        fetch_image(f"{en_name} brand banner"),
+        "(Page Title) عنوان صفحة العلامة التجارية":     f"عطور {formatted_name} الأصلية | مهووس",
+        "(SEO Page URL) رابط صفحة العلامة التجارية":    to_slug(en_name),
+        "(Page Description) وصف صفحة العلامة التجارية": f"تسوّق أحدث عطور {formatted_name} الأصلية الفاخرة بأسعار حصرية من متجر مهووس.",
     }
 
 
@@ -1144,145 +1177,75 @@ def fetch_image(name: str, tester: bool = False) -> str:
 
 
 def scrape_product_url(url: str) -> dict:
-    """سحب بيانات المنتج من رابط URL مع التعامل مع Cloudflare وغيره.
-    يعيد dict يحتوي على: name, price, image, images, desc, brand_hint
-    """
+    """سحب بيانات المنتج من رابط URL مع دعم Cloudflare وتحسين استخراج السعر والصور."""
     result = {"name": "", "price": "", "image": "", "images": [], "desc": "", "brand_hint": "", "error": ""}
     try:
         from bs4 import BeautifulSoup
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                          "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
             "Accept-Language": "ar,en-US;q=0.9,en;q=0.8",
-            "Accept-Encoding": "gzip, deflate, br",
-            "Connection": "keep-alive",
-            "Upgrade-Insecure-Requests": "1",
         }
         resp = requests.get(url, headers=headers, timeout=20, allow_redirects=True)
         if resp.status_code != 200:
             result["error"] = f"خطأ HTTP {resp.status_code}"
             return result
         soup = BeautifulSoup(resp.text, "html.parser")
+        html_text = resp.text
 
-        # ── Extract Name ──────────────────────────────────────────────
-        name = ""
-        # Try og:title first
+        # ── Name ──────────────────────────────────────────────────
         og_title = soup.find("meta", property="og:title")
         if og_title and og_title.get("content"):
-            name = og_title["content"].strip()
-        if not name:
-            h1 = soup.find("h1")
-            if h1:
-                name = h1.get_text(" ", strip=True)
-        if not name:
-            title_tag = soup.find("title")
-            if title_tag:
-                name = title_tag.get_text(strip=True).split("|")[0].split("-")[0].strip()
-        result["name"] = name[:200] if name else ""
+            result["name"] = og_title["content"].strip()
+        elif soup.find("h1"):
+            result["name"] = soup.find("h1").get_text(" ", strip=True)
+        elif soup.find("title"):
+            result["name"] = soup.find("title").get_text(strip=True).split("|")[0].split("-")[0].strip()
 
-        # ── Extract Price ─────────────────────────────────────────────
-        price = ""
-        # Try structured data (JSON-LD)
+        # ── Price ─────────────────────────────────────────────────
+        # Try JSON-LD first
         for script in soup.find_all("script", type="application/ld+json"):
             try:
-                data = json.loads(script.string or "{}")
-                if isinstance(data, list):
-                    data = data[0]
+                import json as _j
+                data = _j.loads(script.string or "{}")
+                if isinstance(data, list): data = data[0]
                 offers = data.get("offers", data.get("Offers", {}))
-                if isinstance(offers, list):
-                    offers = offers[0]
+                if isinstance(offers, list): offers = offers[0]
                 p = offers.get("price", "")
-                if p:
-                    price = str(p)
-                    break
-            except Exception:
-                pass
-        if not price:
-            # Try og:price
-            og_price = soup.find("meta", property="product:price:amount")
-            if og_price and og_price.get("content"):
-                price = og_price["content"]
-        if not price:
-            # Try common price selectors
-            for sel in [".price", "[class*='price']", "[itemprop='price']", ".product-price"]:
-                el = soup.select_one(sel)
-                if el:
-                    txt = el.get_text(strip=True)
-                    nums = re.findall(r'[\d,\.]+', txt)
-                    if nums:
-                        price = nums[0].replace(",", "")
-                        break
-        result["price"] = price
+                if p: result["price"] = str(p); break
+            except Exception: pass
+        if not result["price"]:
+            meta_price = soup.find("meta", property="product:price:amount")
+            if meta_price and meta_price.get("content"):
+                result["price"] = meta_price["content"]
+        if not result["price"]:
+            price_match = re.search(r'(?:السعر|price|SAR|ر\.س|ريال)[^\d]*([\d\.,]+)', html_text, re.IGNORECASE)
+            if price_match: result["price"] = price_match.group(1).replace(",", "")
 
-        # ── Extract Images ────────────────────────────────────────────
+        # ── Images ────────────────────────────────────────────────
         images = []
         og_img = soup.find("meta", property="og:image")
-        if og_img and og_img.get("content"):
-            images.append(og_img["content"])
-        # Try JSON-LD images
-        for script in soup.find_all("script", type="application/ld+json"):
-            try:
-                data = json.loads(script.string or "{}")
-                if isinstance(data, list):
-                    data = data[0]
-                imgs = data.get("image", [])
-                if isinstance(imgs, str):
-                    imgs = [imgs]
-                for img in imgs[:5]:
-                    if img and img not in images:
-                        images.append(img)
-            except Exception:
-                pass
-        # Try product gallery images
-        for img_tag in soup.select("img[src]"):
-            src = img_tag.get("src", "")
-            if any(kw in src.lower() for kw in ["product", "item", "shop", "catalog", "perfume", "bottle"]):
-                if src.startswith("http") and src not in images:
-                    images.append(src)
-                    if len(images) >= 6:
-                        break
-        result["image"] = images[0] if images else ""
+        if og_img and og_img.get("content"): images.append(og_img["content"])
+        for img in soup.select("img[src]"):
+            src = img.get("src", "")
+            if src.startswith("http") and src not in images and any(
+                    kw in src.lower() for kw in ["product","cdn","item","shop","perfume","bottle"]):
+                images.append(src)
+                if len(images) >= 6: break
+        result["image"]  = images[0] if images else ""
         result["images"] = images[:6]
 
-        # ── Extract Description ───────────────────────────────────────
-        desc = ""
+        # ── Description ───────────────────────────────────────────
         og_desc = soup.find("meta", property="og:description")
         if og_desc and og_desc.get("content"):
-            desc = og_desc["content"].strip()
-        if not desc:
-            meta_desc = soup.find("meta", attrs={"name": "description"})
-            if meta_desc and meta_desc.get("content"):
-                desc = meta_desc["content"].strip()
-        if not desc:
-            for sel in [".product-description", "[class*='description']", "[itemprop='description']"]:
-                el = soup.select_one(sel)
-                if el:
-                    desc = el.get_text(" ", strip=True)[:500]
-                    break
-        result["desc"] = desc[:500] if desc else ""
+            result["desc"] = og_desc["content"].strip()
+        elif soup.find("meta", attrs={"name": "description"}):
+            result["desc"] = soup.find("meta", attrs={"name": "description"}).get("content", "").strip()
 
-        # ── Extract Brand Hint ────────────────────────────────────────
-        brand_hint = ""
+        # ── Brand ─────────────────────────────────────────────────
         og_brand = soup.find("meta", property="product:brand")
         if og_brand and og_brand.get("content"):
-            brand_hint = og_brand["content"]
-        if not brand_hint:
-            for script in soup.find_all("script", type="application/ld+json"):
-                try:
-                    data = json.loads(script.string or "{}")
-                    if isinstance(data, list):
-                        data = data[0]
-                    b = data.get("brand", {})
-                    if isinstance(b, dict):
-                        brand_hint = b.get("name", "")
-                    elif isinstance(b, str):
-                        brand_hint = b
-                    if brand_hint:
-                        break
-                except Exception:
-                    pass
-        result["brand_hint"] = brand_hint
+            result["brand_hint"] = og_brand["content"]
 
     except requests.exceptions.Timeout:
         result["error"] = "انتهت مهلة الاتصال (timeout)"
@@ -1292,28 +1255,22 @@ def scrape_product_url(url: str) -> dict:
         result["error"] = f"خطأ: {str(e)[:100]}"
     return result
 
-
 def _ai_fetch_notes_only(name: str, brand_name: str, api_key: str) -> dict:
-    """استدعاء AI صغير ورخيص: يجلب المكونات والعائلة وسنة الإصدار فقط."""
+    """استدعاء AI صغير: يجلب المكونات والعائلة وسنة الإصدار فقط."""
     try:
         client = anthropic.Anthropic(api_key=api_key)
         msg = client.messages.create(
-            model="claude-haiku-4-5",
+            model="claude-3-haiku-20240307",
             max_tokens=300,
             messages=[{"role": "user", "content":
                 f"للعطر: {name} من {brand_name}\n"
-                f"أجب بصيغة JSON فقط (JSON خالص بدون أي نص):\n"
-                '{"top": "[3-4 مكونات المقدمة]", '
-                '"heart": "[3-4 مكونات القلب]", '
-                '"base": "[3-4 مكونات القاعدة]", '
-                '"family": "[العائلة العطرية]", '
-                '"year": "[سنة الإصدار أو غير معروف]"}'
+                f"أجب بصيغة JSON فقط:\n"
+                '{{"top": "...", "heart": "...", "base": "...", "family": "...", "year": "..."}}'
             }],
         )
         import json as _json
         raw = msg.content[0].text.strip()
-        # استخراج JSON من الرد
-        m = re.search(r'\{.*\}', raw, re.DOTALL)
+        m = re.search(r'\{[\s\S]*\}', raw)
         if m:
             return _json.loads(m.group())
     except Exception:
@@ -1323,7 +1280,6 @@ def _ai_fetch_notes_only(name: str, brand_name: str, api_key: str) -> dict:
             "base": "مسك، عنبر، خشب الصندل",
             "family": "عطرية شرقية",
             "year": "غير معروف"}
-
 
 def _build_html_description(name: str, tester: bool, brand: dict,
                              size: str, gender: str, conc: str,
@@ -1944,31 +1900,32 @@ if st.session_state.page == "pipeline":
                 if any(w in nl for w in ["رجال","للرجال","men","homme"]): gender_kw = "للرجال"
                 elif any(w in nl for w in ["نساء","للنساء","women","femme"]): gender_kw = "للنساء"
 
-                # ربط الماركة
-                brand_d = match_brand(pname)
-                prow_brand = str(prow.get("الماركة","") or "")
-                if not brand_d.get("name") and prow_brand:
-                    brand_d = {"name": prow_brand, "page_url": ""}
+                # ربط وتنظيف الماركة
+                brand_d    = match_brand(pname)
+                prow_brand = clean_brand_name(str(prow.get("الماركة","") or ""))
 
-                # توليد ماركة جديدة إذا لزم
+                if not brand_d.get("name") and prow_brand:
+                    brand_d = match_brand(prow_brand)
+
+                is_new_generated = False
                 if not brand_d.get("name") and prow_brand:
                     brand_d = generate_new_brand(prow_brand)
+                    is_new_generated = True
 
-                # تتبع الماركات الجديدة
                 if brand_d.get("name"):
                     bn_low = brand_d["name"].lower()
                     if bn_low not in known_brand_names and                             (st.session_state.brands_df is None or
-                             not any(brand_d["name"] in str(r.iloc[0])
+                             not any(bn_low in str(r.iloc[0]).lower()
                                      for _, r in st.session_state.brands_df.iterrows())):
-                        new_brand_entry = {
-                            "اسم الماركة": brand_d["name"],
-                            "وصف مختصر عن الماركة": f"علامة تجارية متخصصة في العطور الفاخرة — {brand_d['name']}",
-                            "صورة شعار الماركة": "",
-                            "(إختياري) صورة البانر": "",
-                            "(Page Title) عنوان صفحة العلامة التجارية": f"عطور {brand_d['name']} الأصلية | مهووس",
-                            "(SEO Page URL) رابط صفحة العلامة التجارية": brand_d.get("page_url", to_slug(brand_d["name"])),
-                            "(Page Description) وصف صفحة العلامة التجارية":
-                                f"تسوّق أحدث عطور {brand_d['name']} الأصلية بأسعار حصرية من متجر مهووس.",
+
+                        new_brand_entry = brand_d.copy() if is_new_generated else {
+                            "اسم الماركة":                                   brand_d["name"],
+                            "وصف مختصر عن الماركة":                         f"علامة تجارية متخصصة في العطور الفاخرة — {brand_d['name']}",
+                            "صورة شعار الماركة":                            "",
+                            "(إختياري) صورة البانر":                        "",
+                            "(Page Title) عنوان صفحة العلامة التجارية":     f"عطور {brand_d['name']} الأصلية | مهووس",
+                            "(SEO Page URL) رابط صفحة العلامة التجارية":    brand_d.get("page_url", to_slug(brand_d["name"])),
+                            "(Page Description) وصف صفحة العلامة التجارية": f"تسوّق أحدث عطور {brand_d['name']} الأصلية بأسعار حصرية من متجر مهووس.",
                         }
                         if bn_low not in known_brand_names:
                             new_brands_found.append(new_brand_entry)
@@ -2373,6 +2330,8 @@ if st.session_state.page == "processor":
                         prog.progress(int((n+1)/len(idxs)*100))
 
                     st.session_state.up_df = df
+                    if "main_grid" in st.session_state:
+                        del st.session_state["main_grid"]
                     stat.markdown(f'<div class="prog-ok">✅ تم توليد {len(idxs)} وصف!</div>',
                                   unsafe_allow_html=True)
                     st.rerun()
@@ -2410,6 +2369,8 @@ if st.session_state.page == "processor":
                     prog.progress(int((n+1)/len(idxs)*100))
 
                 st.session_state.up_df = df
+                if "main_grid" in st.session_state:
+                    del st.session_state["main_grid"]
                 stat.markdown(f'<div class="prog-ok">✅ تم جلب {fetched} صورة من {len(idxs)} صف</div>',
                               unsafe_allow_html=True)
                 st.rerun()
@@ -2448,6 +2409,8 @@ if st.session_state.page == "processor":
                     if not str(df.iloc[i].get("تصنيف المنتج","")).strip():
                         df.at[df.index[i], "تصنيف المنتج"] = cat
                 st.session_state.up_df = df
+                if "main_grid" in st.session_state:
+                    del st.session_state["main_grid"]
                 if new_brands_auto:
                     for bn in new_brands_auto:
                         st.session_state.new_brands.append({
@@ -2525,6 +2488,8 @@ if st.session_state.page == "processor":
                         })
 
                 st.session_state.up_df = df
+                if "main_grid" in st.session_state:
+                    del st.session_state["main_grid"]
                 if seo_rows:
                     st.session_state.up_seo = pd.DataFrame(seo_rows)
                 stat.markdown('<div class="prog-ok">✅ تمت جميع العمليات!</div>',
@@ -2567,6 +2532,8 @@ if st.session_state.page == "processor":
             if st.button("💾 حفظ الوصف", key="save_d"):
                 df.at[df.index[sel_p], "الوصف"] = new_d
                 st.session_state.up_df = df
+                if "main_grid" in st.session_state:
+                    del st.session_state["main_grid"]
                 st.success("✅ تم حفظ الوصف")
                 st.rerun()
 
@@ -3600,36 +3567,31 @@ elif st.session_state.page == "store_audit":
         # ── تشغيل الفحص ──────────────────────────────────────────
         if st.button("🔍 فحص الملف الآن", type="primary", key="run_audit"):
             issues = []
+            prog_bar = st.progress(0, text="جاري فحص المنتجات...")
+            total = len(audit_df)
             for i, row in audit_df.iterrows():
+                if i % 10 == 0:
+                    prog_bar.progress(int((i / max(total, 1)) * 100), text=f"فحص: {i}/{total}")
                 row_issues = []
                 name = str(row.get(a_nm, "") or "").strip() if a_nm != NONE_A else ""
                 if not name or name == "nan":
                     continue
 
-                if a_img != NONE_A:
-                    img_val = str(row.get(a_img, "") or "").strip()
-                    if not img_val or img_val == "nan":
-                        row_issues.append("بدون صورة")
+                if a_img != NONE_A and not str(row.get(a_img, "") or "").strip():
+                    row_issues.append("بدون صورة")
+                if a_cat != NONE_A and not str(row.get(a_cat, "") or "").strip():
+                    row_issues.append("بدون تصنيف")
+                if a_br != NONE_A and not str(row.get(a_br, "") or "").strip():
+                    row_issues.append("بدون ماركة")
 
-                if a_cat != NONE_A:
-                    cat_val = str(row.get(a_cat, "") or "").strip()
-                    if not cat_val or cat_val == "nan":
-                        row_issues.append("بدون تصنيف")
+                desc_val = str(row.get(a_desc, "") or "").strip() if a_desc != NONE_A else ""
+                if not desc_val or desc_val == "nan" or len(desc_val) < 20:
+                    row_issues.append("بدون وصف")
+                elif ("تستر" in name.lower() or "tester" in name.lower()) and                         "تستر" not in desc_val and "tester" not in desc_val.lower():
+                    row_issues.append("وصف التستر غير صحيح")
 
-                if a_br != NONE_A:
-                    br_val = str(row.get(a_br, "") or "").strip()
-                    if not br_val or br_val == "nan":
-                        row_issues.append("بدون ماركة")
-
-                if a_desc != NONE_A:
-                    desc_val = str(row.get(a_desc, "") or "").strip()
-                    if not desc_val or desc_val == "nan" or len(desc_val) < 20:
-                        row_issues.append("بدون وصف")
-
-                if a_pr != NONE_A:
-                    pr_val = str(row.get(a_pr, "") or "").strip()
-                    if not pr_val or pr_val in ["0", "nan", ""]:
-                        row_issues.append("بدون سعر")
+                if a_pr != NONE_A and str(row.get(a_pr, "") or "").strip() in ["0", "nan", ""]:
+                    row_issues.append("بدون سعر")
 
                 if row_issues:
                     issues.append({
@@ -3641,7 +3603,7 @@ elif st.session_state.page == "store_audit":
                         "وصف صورة المنتج":   name,
                         "نوع المنتج":        "منتج جاهز",
                         "سعر المنتج":        str(row.get(a_pr, "") or "") if a_pr != NONE_A else "",
-                        "الوصف":             str(row.get(a_desc, "") or "") if a_desc != NONE_A else "",
+                        "الوصف":             desc_val,
                         "هل يتطلب شحن؟":    "نعم",
                         "رمز المنتج sku":    str(row.get(a_sku, "") or "") if a_sku != NONE_A else "",
                         "الوزن":             "0.2",
@@ -3653,7 +3615,7 @@ elif st.session_state.page == "store_audit":
                         "_issues":           " | ".join(row_issues),
                         "_idx":              i,
                     })
-
+            prog_bar.progress(100, text="اكتمل الفحص!")
             st.session_state.audit_results = pd.DataFrame(issues) if issues else pd.DataFrame()
             st.rerun()
 
@@ -3698,54 +3660,103 @@ elif st.session_state.page == "store_audit":
                     width='stretch'
                 )
 
-                # تصدير بتنسيق ملف تحديث سلة
+                # ── الإصلاح التلقائي والتصدير ──────────────────────────────────
                 st.markdown("""<hr class="gdiv"><div class="sec-title"><div class="bar"></div>
-                <h3>تصدير للمعالجة</h3></div>""", unsafe_allow_html=True)
+                <h3>🛠️ الإصلاح التلقائي وتصدير الملف</h3></div>""", unsafe_allow_html=True)
+                st.info(f"سيقوم النظام بإصلاح {len(filtered_audit):,} منتج تلقائياً (جلب صور، توليد أوصاف، تعيين ماركات وتصنيفات).")
 
-                st.info(f"سيتم تصدير {len(filtered_audit):,} منتج بتنسيق 'ملف تحديث أو تعديل منتجات سلة' جاهز للرفع بعد المعالجة.")
+                if st.button("🚀 بدء إصلاح النواقص أوتوماتيكياً", type="primary",
+                             key="start_auto_fix", use_container_width=True):
+                    if not st.session_state.api_key:
+                        st.error("⚠️ يرجى إضافة مفتاح Claude API لتوليد الأوصاف.")
+                    else:
+                        fix_prog = st.progress(0); fix_stat = st.empty()
+                        fixed_rows = []
+                        total_fix = len(filtered_audit)
 
-                # بناء ملف التحديث بتنسيق سلة
-                def build_update_file(df_issues: pd.DataFrame) -> pd.DataFrame:
-                    update_cols = SALLA_COLS
-                    rows = []
-                    for _, r in df_issues.iterrows():
-                        row = {col: "" for col in update_cols}
-                        for col in update_cols:
-                            if col in r.index:
-                                row[col] = str(r[col] or "")
-                        row["النوع "] = "منتج"
-                        rows.append(row)
-                    return pd.DataFrame(rows, columns=update_cols)
+                        for fix_i, (_, f_row) in enumerate(filtered_audit.iterrows()):
+                            fix_prog.progress(int((fix_i / max(total_fix, 1)) * 100))
+                            pname = f_row["أسم المنتج"]
+                            iss   = f_row["_issues"]
+                            fix_stat.markdown(
+                                f'<div class="prog-run">جاري إصلاح: {pname[:50]}...</div>',
+                                unsafe_allow_html=True)
 
-                update_df = build_update_file(filtered_audit)
+                            attrs  = extract_product_attrs(pname)
+                            size   = attrs.get("size") or "100 مل"
+                            conc   = attrs.get("concentration") or "EDP"
+                            is_t   = "تستر" in attrs.get("type", "")
+                            gender = ("للنساء" if any(w in pname.lower() for w in ["نساء","women","نسائ"])
+                                      else "للرجال" if any(w in pname.lower() for w in ["رجال","men","رجالي"])
+                                      else "للجنسين")
 
-                aud_e1, aud_e2, aud_e3 = st.columns(3)
-                with aud_e1:
-                    st.download_button(
-                        f"📥 ملف التحديث — Excel ({len(update_df):,} منتج)",
-                        export_product_xlsx(update_df),
-                        f"تحديث_منتجات_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
-                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        width='stretch', key="dl_audit_x"
-                    )
-                with aud_e2:
-                    st.download_button(
-                        f"📥 ملف التحديث — CSV ({len(update_df):,} منتج)",
-                        export_product_csv(update_df),
-                        f"تحديث_منتجات_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
-                        "text/csv", width='stretch', key="dl_audit_c"
-                    )
-                with aud_e3:
-                    if st.button("🛠️ نقل للمُعالج لإكمال البيانات", key="audit_to_proc",
-                                 width='stretch'):
-                        st.session_state.up_df      = update_df
-                        st.session_state.up_mapped  = True
-                        st.session_state.up_filename = f"تحديث_منتجات_{len(update_df)}"
-                        st.session_state.page       = "processor"
-                        st.rerun()
+                            brand_dict = match_brand(pname)
+                            if not brand_dict.get("name") and f_row["الماركة"]:
+                                brand_dict = match_brand(f_row["الماركة"])
+                            if "بدون ماركة" in iss or not brand_dict.get("name"):
+                                if not brand_dict.get("name"):
+                                    extracted_b = clean_brand_name(pname.split()[0] if pname.split() else "")
+                                    if extracted_b:
+                                        brand_dict = generate_new_brand(extracted_b)
+                            f_row["الماركة"] = brand_dict.get("name", f_row["الماركة"])
+
+                            if "بدون تصنيف" in iss or not f_row["تصنيف المنتج"]:
+                                f_row["تصنيف المنتج"] = ("العطور > تستر" if is_t
+                                                          else match_category(pname, gender))
+
+                            if "بدون صورة" in iss or not f_row["صورة المنتج"]:
+                                f_row["صورة المنتج"] = fetch_image(pname, is_t)
+
+                            if "بدون وصف" in iss or "وصف التستر غير صحيح" in iss:
+                                f_row["الوصف"] = ai_generate(
+                                    pname, is_t, brand_dict, str(size), gender,
+                                    conc if conc != "UNKNOWN" else "أو دو بارفيوم")
+
+                            seo_data = gen_seo(pname, brand_dict, str(size), is_t, gender)
+                            f_row["وصف صورة المنتج"] = seo_data["alt"]
+
+                            final_dict = {col: "" for col in SALLA_COLS}
+                            for col in SALLA_COLS:
+                                if col in f_row:
+                                    final_dict[col] = str(f_row[col])
+                            final_dict["النوع "] = "منتج"
+                            fixed_rows.append(final_dict)
+
+                        fix_prog.progress(100)
+                        fix_stat.markdown(
+                            '<div class="prog-ok">✅ اكتمل الإصلاح التلقائي!</div>',
+                            unsafe_allow_html=True)
+                        st.session_state.audit_fixed_df = pd.DataFrame(fixed_rows, columns=SALLA_COLS)
+
+                if "audit_fixed_df" in st.session_state and st.session_state.audit_fixed_df is not None:
+                    date_str = datetime.now().strftime("%Y%m%d_%H%M")
+                    aud_e1, aud_e2, aud_e3 = st.columns(3)
+                    with aud_e1:
+                        st.download_button(
+                            f"📥 الملف المُصلح — Excel ({len(st.session_state.audit_fixed_df)})",
+                            export_product_xlsx(st.session_state.audit_fixed_df),
+                            f"تحديث_منتجات_{date_str}.xlsx",
+                            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            width='stretch', key="dl_audit_fix_x")
+                    with aud_e2:
+                        st.download_button(
+                            f"📥 الملف المُصلح — CSV ({len(st.session_state.audit_fixed_df)})",
+                            export_product_csv(st.session_state.audit_fixed_df),
+                            f"تحديث_منتجات_{date_str}.csv",
+                            "text/csv", width='stretch', key="dl_audit_fix_c")
+                    with aud_e3:
+                        if st.button("🛠️ نقل للمُعالج لمراجعة إضافية", key="audit_to_proc",
+                                     width='stretch'):
+                            st.session_state.up_df      = st.session_state.audit_fixed_df
+                            st.session_state.up_mapped  = True
+                            st.session_state.up_filename = f"تحديث_منتجات_{len(st.session_state.audit_fixed_df)}"
+                            st.session_state.page        = "processor"
+                            st.rerun()
 
                 if st.button("🔄 إعادة الفحص", key="reset_audit"):
                     st.session_state.audit_results = None
+                    if "audit_fixed_df" in st.session_state:
+                        del st.session_state["audit_fixed_df"]
                     st.rerun()
 
     else:
