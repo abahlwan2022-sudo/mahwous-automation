@@ -1617,6 +1617,40 @@ with st.sidebar:
     ])
     st.markdown(status_html, unsafe_allow_html=True)
 
+    st.divider()
+    st.markdown("**💾 حماية البيانات (Railway Backup)**")
+    bkp_col1, bkp_col2 = st.columns(2)
+    backup_path = os.path.join(DATA_DIR, "session_backup.pkl")
+    with bkp_col1:
+        if st.button("💾 حفظ الجلسة", use_container_width=True, key="bkp_save"):
+            try:
+                save_dict = {k: v for k, v in st.session_state.items()
+                             if k in ["up_df","up_seo","qa_rows","new_brands",
+                                      "up_filename","pipe_store_df","cmp_new_df"]}
+                import pickle as _pickle
+                os.makedirs(DATA_DIR, exist_ok=True)
+                with open(backup_path, "wb") as _f:
+                    _pickle.dump(save_dict, _f)
+                st.toast("✅ تم الحفظ بنجاح")
+            except Exception as _e:
+                st.toast(f"❌ فشل الحفظ: {_e}")
+    with bkp_col2:
+        if st.button("📂 استعادة", use_container_width=True, key="bkp_load"):
+            try:
+                import pickle as _pickle
+                if os.path.exists(backup_path):
+                    with open(backup_path, "rb") as _f:
+                        loaded = _pickle.load(_f)
+                    for k, v in loaded.items():
+                        st.session_state[k] = v
+                    st.toast("✅ تمت الاستعادة")
+                    time.sleep(1)
+                    st.rerun()
+                else:
+                    st.toast("⚠️ لا توجد جلسة محفوظة")
+            except Exception:
+                st.toast("❌ فشل الاستعادة")
+
     # New brands indicator
     if st.session_state.new_brands:
         st.divider()
@@ -3252,127 +3286,32 @@ elif st.session_state.page == "compare":
             elif store_name_col == NONE_C:
                 st.error("حدد عمود اسم المنتج في ملف المتجر")
             else:
-                with st.spinner("جاري المقارنة..."):
-                    # Build store name & SKU sets
-                    store_names = [str(v).strip().lower() for v in
-                                   store_df[store_name_col].fillna("").tolist() if str(v).strip()]
-                    store_skus  = set()
-                    if store_sku_col != NONE_C:
-                        store_skus = {str(v).strip().lower() for v in
-                                      store_df[store_sku_col].fillna("").tolist() if str(v).strip()}
+                with st.spinner("جاري المقارنة والتدقيق باستخدام المحرك الذكي v12.0..."):
+                    # استخراج قائمة الماركات
+                    brands_v12 = []
+                    if st.session_state.brands_df is not None:
+                        brands_v12 = (st.session_state.brands_df[st.session_state.brands_df.columns[0]]
+                                      .dropna().astype(str).str.strip().tolist())
 
-                    # ── Advanced 5-Stage Comparison Engine ──
-                    results = []
-                    
-                    # Pre-process store products for advanced matching
-                    store_parsed = []
-                    for idx, row in store_df.iterrows():
-                        sname = str(row.get(store_name_col, "") or "").strip()
-                        if not sname: continue
-                        attrs = extract_product_attrs(sname)
-                        store_parsed.append({
-                            "orig_name": sname,
-                            "clean_name": attrs["clean_name"],
-                            "size": attrs["size"],
-                            "type": attrs["type"],
-                            "concentration": attrs["concentration"],
-                            "sku": str(row.get(store_sku_col, "") or "").strip() if store_sku_col != NONE_C else ""
-                        })
-                    
-                    store_clean_dict = {i: p["clean_name"] for i, p in enumerate(store_parsed)}
-                    store_skus = {p["sku"].lower(): p["orig_name"] for p in store_parsed if p["sku"]}
+                    # تحديد عمود الصورة تلقائياً من ملف المنتجات الجديدة
+                    new_img_col_guess = auto_guess_col(new_df.columns, ["صورة","image","src","img"])
+                    new_img_col = new_img_col_guess if new_img_col_guess != NONE_C else None
 
-                    for i, row in new_df.iterrows():
-                        new_name = str(row.get(new_name_col, "") or "").strip()
-                        new_sku  = str(row.get(new_sku_col, "") or "").strip() if new_sku_col != NONE_C else ""
-                        new_img  = str(row.get("صورة المنتج","") or "")
-                        
-                        if not new_name:
-                            continue
-
-                        # Stage 1: Exact SKU Match
-                        if new_sku and new_sku.lower() in store_skus:
-                            results.append({
-                                "الاسم الجديد":      new_name,
-                                "SKU الجديد":        new_sku,
-                                "أقرب تطابق في المتجر": store_skus[new_sku.lower()],
-                                "نسبة التشابه":      100,
-                                "الحالة":            "مكرر (SKU)",
-                                "الإجراء":           "حذف",
-                                "_idx":              i,
-                                "_img":              new_img,
-                            })
-                            continue
-
-                        # Stage 2 & 3: Advanced Attribute & Fuzzy Matching
-                        new_attrs = extract_product_attrs(new_name)
-                        new_clean = new_attrs["clean_name"]
-                        new_size  = new_attrs["size"]
-                        new_type  = new_attrs["type"]
-                        new_conc  = new_attrs["concentration"]
-                        
-                        best_score = 0
-                        best_match = ""
-                        best_sp = None
-                        
-                        if store_clean_dict:
-                            if HAS_RAPIDFUZZ:
-                                best = rf_process.extractOne(new_clean, store_clean_dict, scorer=rf_fuzz.token_set_ratio)
-                                if best:
-                                    _, best_score, pos = best
-                                    best_sp = store_parsed[pos]
-                                    best_match = best_sp["orig_name"]
-                            else:
-                                for idx2, clean2 in store_clean_dict.items():
-                                    s = _fuzzy_ratio(new_clean, clean2)
-                                    if s > best_score:
-                                        best_score = s
-                                        best_sp = store_parsed[idx2]
-                                        best_match = best_sp["orig_name"]
-
-                        # Stage 4: Logical Verdict based on attributes
-                        if best_score >= 90:
-                            # High text similarity - check attributes
-                            if new_type != best_sp["type"]:
-                                status = "جديد"
-                                action = "اعتماد"
-                                reason = f"نوع مختلف: {new_type} vs {best_sp['type']}"
-                                best_score -= 20 # Penalize score for display
-                            elif new_size != best_sp["size"] and new_size != 0 and best_sp["size"] != 0:
-                                status = "جديد"
-                                action = "اعتماد"
-                                reason = f"حجم مختلف: {new_size}ml vs {best_sp['size']}ml"
-                                best_score -= 15
-                            elif new_conc != best_sp["concentration"] and new_conc != "غير محدد" and best_sp["concentration"] != "غير محدد":
-                                status = "جديد"
-                                action = "اعتماد"
-                                reason = f"تركيز مختلف: {new_conc} vs {best_sp['concentration']}"
-                                best_score -= 10
-                            else:
-                                status = "مكرر (اسم وخصائص)"
-                                action = "حذف"
-                        elif best_score >= sim_threshold:
-                            status = "مشبوه"
-                            action = "مراجعة"
-                        else:
-                            status = "جديد"
-                            action = "اعتماد"
-
-                        results.append({
-                            "الاسم الجديد":      new_name,
-                            "SKU الجديد":        new_sku,
-                            "أقرب تطابق في المتجر": best_match,
-                            "نسبة التشابه":      best_score,
-                            "الحالة":            status,
-                            "الإجراء":           action,
-                            "_idx":              i,
-                            "_img":              new_img,
-                        })
-
-                    st.session_state.cmp_results  = pd.DataFrame(results)
+                    results_df = run_smart_comparison(
+                        new_df=new_df,
+                        store_df=store_df,
+                        new_name_col=new_name_col,
+                        store_name_col=store_name_col,
+                        new_sku_col=new_sku_col if new_sku_col != NONE_C else None,
+                        store_sku_col=store_sku_col if store_sku_col != NONE_C else None,
+                        new_img_col=new_img_col,
+                        t_dup=88, t_near=sim_threshold, t_review=50,
+                        brands_list=brands_v12,
+                    )
+                    st.session_state.cmp_results  = results_df
                     st.session_state.cmp_approved = {
                         r["_idx"]: (r["الإجراء"] == "اعتماد")
-                        for r in results
+                        for _, r in results_df.iterrows()
                     }
                 st.rerun()
 
@@ -3414,10 +3353,15 @@ elif st.session_state.page == "compare":
 
                 cc1, cc2, cc3 = st.columns([1, 4, 2])
                 with cc1:
-                    if img and img.startswith("http"):
-                        st.image(img, width=80)
+                    img_url = str(img).strip()
+                    if img_url and img_url.startswith("http"):
+                        first_img = img_url.split(",")[0].strip()
+                        st.image(first_img, width=80)
                     else:
-                        st.markdown("🖼", unsafe_allow_html=False)
+                        st.markdown(
+                            """<div style="width:80px;height:80px;background:#eee;border-radius:8px;"""
+                            """display:flex;align-items:center;justify-content:center;font-size:24px">🖼</div>""",
+                            unsafe_allow_html=True)
                 with cc2:
                     st.markdown(f"""
                     <div style="direction:rtl">
