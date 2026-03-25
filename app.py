@@ -792,6 +792,48 @@ class _ClusterMatchEngine_v12:
 
 # ── دوال التوافق مع الكود القديم ────────────────────────────────
 
+def standardize_product_name(raw_name: str, brand_name: str) -> str:
+    """
+    إعادة صياغة اسم المنتج بالترتيب المعتمد:
+    (عطر/تستر) + (الاسم الأساسي) + (الماركة بالعربية) + (التركيز) + (الحجم)
+    """
+    p = _ProductRecord_v12(raw_name=raw_name, brand=brand_name)
+
+    type_prefixes = {
+        "TESTER":     "تستر",  "SET":       "طقم",       "HAIR_MIST": "عطر شعر",
+        "LOTION":     "لوشن",  "BODY_WASH": "شاور جل",   "CREAM":     "كريم",
+        "BODY_SPRAY": "معطر جسم", "DEODORANT": "مزيل عرق",
+        "MIST":       "معطر",  "PERFUME":   "عطر",       "OIL":       "زيت عطري",
+    }
+    prefix = type_prefixes.get(p.product_type, "عطر")
+    if "تستر" in raw_name.lower() or "tester" in raw_name.lower():
+        prefix = "تستر"
+
+    core = p.core_name
+    b_ar = brand_name.split("|")[0].strip() if brand_name else p.brand_normalized
+    if b_ar and b_ar in core:
+        core = core.replace(b_ar, "").strip()
+
+    conc_map = {
+        "EDP": "أو دو بارفيوم", "EDT": "أو دو تواليت",
+        "EDC": "أو دو كولون",   "PARFUM": "بارفيوم",
+    }
+    conc_str = conc_map.get(p.concentration, "")
+    if not conc_str:
+        rn = raw_name.lower()
+        if any(k in rn for k in ["بارفيوم","parfum","edp"]):   conc_str = "أو دو بارفيوم"
+        elif any(k in rn for k in ["تواليت","toilette","edt"]): conc_str = "أو دو تواليت"
+        elif any(k in rn for k in ["كولون","cologne","edc"]):   conc_str = "أو دو كولون"
+
+    if p.size > 0:
+        size_str = f"{int(p.size) if p.size == int(p.size) else p.size} مل"
+    else:
+        size_str = ""
+
+    parts = [x for x in [prefix, core, b_ar, conc_str, size_str] if x]
+    return re.sub(r"\s+", " ", " ".join(parts)).strip()
+
+
 def extract_product_attrs(name: str) -> dict:
     """استخراج الحجم، النوع، التركيز، الاسم الجوهري — v12.0 (صفر أخطاء)."""
     p = _ProductRecord_v12(raw_name=name, brand="")
@@ -966,9 +1008,9 @@ def ai_filter_suspects(suspects_df: pd.DataFrame, store_names: list,
 
         suspects_json = json.dumps(suspects_list, ensure_ascii=False)
 
-        prompt = f"""أنت محلل بيانات عطور خبير لمتجر مهووس.
+        prompt = f"""أنت مدقق بيانات عطور بصرامة 100% لمتجر مهووس.
 
-لديك قائمة منتجات "مشبوهة" (نسبة تشابهها مع متجرنا بين 55-88%) يجب أن تقرر لكل منها: هل هي جديدة فعلاً أم مكررة؟
+قاعدتك الذهبية: اختلاف الحجم (مثلاً 50مل و100مل) أو التركيز (EDP و EDT) أو النوع (تستر وعادي) يعني أن المنتج "جديد" قطعاً حتى لو تطابق الاسم تماماً. التشابه في الحروف مع اختلاف الماركة يعني "جديد".
 
 **قائمة منتجاتنا الموجودة (عينة):**
 {store_list_str}
@@ -976,13 +1018,14 @@ def ai_filter_suspects(suspects_df: pd.DataFrame, store_names: list,
 **المنتجات المشبوهة للفحص:**
 {suspects_json}
 
-**قواعد القرار الصارمة:**
-1. إذا كان المنتج نفس الاسم تقريباً (اختلاف طفيف في الكتابة فقط) → مكرر
-2. إذا كان نفس العطر لكن حجم مختلف (مثل 100مل vs 150مل) → جديد (لأنه حجم مختلف)
-3. إذا كان نفس العطر لكن تستر vs عادي → جديد (نوع مختلف)
-4. إذا كان اسم مختلف كلياً رغم النسبة العالية → جديد
+**قواعد القرار الصارمة (بالترتيب):**
+1. حجم مختلف (50مل vs 100مل vs 150مل) → جديد قطعاً
+2. تركيز مختلف (EDP vs EDT vs EDC) → جديد قطعاً
+3. نوع مختلف (تستر vs عادي) → جديد قطعاً
+4. ماركة مختلفة (حتى لو الاسم متشابه) → جديد قطعاً
+5. نفس الاسم حرفياً + نفس الحجم + نفس التركيز → مكرر
 
-أجب بـ JSON فقط (بدون أي نص):
+أرجع JSON النقي فقط بدون أي نصوص خارجه:
 {{"decisions": [{{"idx": 0, "decision": "جديد", "reason": "..."}} , ...]}}"""
 
         msg = client.messages.create(
@@ -1065,7 +1108,8 @@ def generate_new_brand(brand_name: str) -> dict:
         try:
             client = anthropic.Anthropic(api_key=key)
             prompt = (
-                f"للماركة '{brand_name}'، أعطني JSON فقط بدون أي نص: "
+                f"أنت خبير علامات تجارية عالمية. ترجم ونسق الماركة '{brand_name}' بدقة عالية. "
+                "التزم بصيغة JSON المغلقة بدون أي نصوص أو مقدمات خارجها: "
                 '{"formatted_name": "الاسم بالعربي | الاسم بالانجليزي", '
                 '"en_name": "English name only", '
                 '"desc": "وصف جذاب 30 كلمة لمتجر مهووس"}'
@@ -1256,17 +1300,22 @@ def scrape_product_url(url: str) -> dict:
     return result
 
 def _ai_fetch_notes_only(name: str, brand_name: str, api_key: str) -> dict:
-    """استدعاء AI صغير: يجلب المكونات والعائلة وسنة الإصدار فقط."""
+    """استدعاء AI صغير: يجلب المكونات الحقيقية بقوة مع تخفيض الحرارة."""
     try:
         client = anthropic.Anthropic(api_key=api_key)
+        prompt = (
+            f"أنت خبير كيميائي للعطور. استخرج المكونات الحقيقية لعطر '{name}' "
+            f"من ماركة '{brand_name}'. "
+            "لا تهلوس مكونات غير موجودة — إذا لم تعرفها اكتب 'غير متوفر'. "
+            "الرد يجب أن يكون JSON مغلق بدون أي مقدمات أو نصوص خارجه:\n"
+            '{"top": "مكونات القمة", "heart": "مكونات القلب", '
+            '"base": "مكونات القاعدة", "family": "العائلة العطرية", "year": "سنة الإصدار"}'
+        )
         msg = client.messages.create(
             model="claude-3-haiku-20240307",
             max_tokens=300,
-            messages=[{"role": "user", "content":
-                f"للعطر: {name} من {brand_name}\n"
-                f"أجب بصيغة JSON فقط:\n"
-                '{{"top": "...", "heart": "...", "base": "...", "family": "...", "year": "..."}}'
-            }],
+            temperature=0.1,
+            messages=[{"role": "user", "content": prompt}],
         )
         import json as _json
         raw = msg.content[0].text.strip()
@@ -1275,11 +1324,8 @@ def _ai_fetch_notes_only(name: str, brand_name: str, api_key: str) -> dict:
             return _json.loads(m.group())
     except Exception:
         pass
-    return {"top": "برغموت، ليمون، برتقال",
-            "heart": "ورد، ياسمين، عود",
-            "base": "مسك، عنبر، خشب الصندل",
-            "family": "عطرية شرقية",
-            "year": "غير معروف"}
+    return {"top": "غير متوفر", "heart": "غير متوفر", "base": "غير متوفر",
+            "family": "غير متوفر", "year": "غير معروف"}
 
 def _build_html_description(name: str, tester: bool, brand: dict,
                              size: str, gender: str, conc: str,
@@ -1943,17 +1989,21 @@ if st.session_state.page == "pipeline":
 
                 is_new_generated = False
 
-                # FALLBACK: استخراج الماركة من اسم المنتج عند غيابها في العمود
+                # FALLBACK: استخراج الماركة الذكي — يدعم الماركات الثنائية (توم فورد، إيف سان لوران)
                 if not brand_d.get("name") and not prow_brand:
-                    words = pname.split()
-                    possible_brand = ""
-                    for w in words:
-                        cl = clean_brand_name(w)
-                        if cl:
-                            possible_brand = cl
-                            break
+                    tmp_name = pname
+                    for _ in range(3):
+                        tmp_name = re.sub(
+                            r"^(تستر|تيستر|عطر|طقم|مجموعة|معطر|جسم|شعر|بخاخ|زيت|مزيل|عرق|لوشن|كريم|بودي|شامبو|بلسم|مسكرة|حقيبة|ميني|عينة|سمبل)\s+",
+                            "", tmp_name, flags=re.IGNORECASE).strip()
+                    words = tmp_name.split()
+                    # جرب كلمتين أولاً (توم فورد)، ثم كلمة واحدة
+                    possible_brand = " ".join(words[:2]) if len(words) >= 2 else (words[0] if words else "")
                     if possible_brand:
                         brand_d = match_brand(possible_brand)
+                        if not brand_d.get("name") and len(words) >= 2:
+                            # جرب الكلمة الأولى فقط كخيار ثانٍ
+                            brand_d = match_brand(words[0])
                         if not brand_d.get("name"):
                             prow_brand = possible_brand
 
@@ -1980,6 +2030,7 @@ if st.session_state.page == "pipeline":
                             new_brands_found.append(new_brand_entry)
                             known_brand_names.add(bn_low)
 
+                pname  = standardize_product_name(pname, brand_d.get("name", ""))
                 cat    = match_category(pname, gender_kw)
                 seo    = gen_seo(pname, brand_d, str(size), is_t, gender_kw)
 
@@ -2240,10 +2291,11 @@ if st.session_state.page == "processor":
                         if b_name not in existing_new and b_name not in new_brands_found:
                             new_brands_found.append(b_name)
 
+                    name = standardize_product_name(name, brand.get("name", ""))
                     cat = match_category(name, gender)
                     if is_test:
                         cat = "العطور > تستر"
-                        
+
                     seo = gen_seo(name, brand, size, is_test, gender)
                     
                     # Generate AI Description if empty (uses ai_generate with Claude)
@@ -3060,6 +3112,7 @@ elif st.session_state.page == "quickadd":
                     else:
                         brand = match_brand(ex_name)
 
+                    ex_name = standardize_product_name(ex_name, brand.get("name", ""))
                     cat = match_category(ex_name, "للجنسين")
 
                     # Extract size from name
@@ -3694,6 +3747,9 @@ elif st.session_state.page == "store_audit":
                                     if extracted_b:
                                         brand_dict = generate_new_brand(extracted_b)
                             f_row["الماركة"] = brand_dict.get("name", f_row["الماركة"])
+
+                            f_row["أسم المنتج"] = standardize_product_name(pname, f_row["الماركة"])
+                            pname = f_row["أسم المنتج"]
 
                             if "بدون تصنيف" in iss or not f_row["تصنيف المنتج"]:
                                 f_row["تصنيف المنتج"] = ("العطور > تستر" if is_t
