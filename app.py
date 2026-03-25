@@ -3363,29 +3363,65 @@ elif st.session_state.page == "compare":
                 pct  = srow["نسبة التشابه"]
                 approved = st.session_state.cmp_approved.get(idx, True)
 
+                # جلب صورة واسم منتج المتجر المطابق
+                store_match_name = srow["أقرب تطابق في المتجر"]
+                store_img_url = ""
+                if store_match_name and store_name_col in store_df.columns:
+                    try:
+                        s_row_match = store_df[store_df[store_name_col] == store_match_name]
+                        if not s_row_match.empty:
+                            s_row_data = s_row_match.iloc[0]
+                            s_img_col = auto_guess_col(store_df.columns, ["صورة","image","src","img"])
+                            if s_img_col in store_df.columns:
+                                s_val = str(s_row_data.get(s_img_col, "")).split(",")[0].strip()
+                                if s_val.startswith("http"):
+                                    store_img_url = s_val.replace(" ", "%20")
+                    except Exception:
+                        pass
+
+                # تنظيف روابط الصور ومنع المسافات
+                new_img_url = str(img).split(",")[0].strip().replace(" ", "%20")
+                if not new_img_url.startswith("http"):
+                    new_img_url = ""
+
+                _ph = "width:64px;height:64px;background:#eee;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:20px;border:1px solid #ccc"
+                _is = "width:64px;height:64px;object-fit:cover;border-radius:8px;border:1px solid rgba(184,147,58,0.3)"
+                _oe = "this.style.display='none'"
+                img_tag_new   = (f'<img src="{new_img_url}" style="{_is}" onerror="{_oe}">'
+                                 if new_img_url
+                                 else f'<div style="{_ph}">🖼</div>')
+                img_tag_store = (f'<img src="{store_img_url}" style="{_is}" onerror="{_oe}">'
+                                 if store_img_url
+                                 else f'<div style="{_ph}">🖼</div>')
+
                 card_cls = "cmp-card suspect"
                 st.markdown(f'<div class="{card_cls}">', unsafe_allow_html=True)
 
-                cc1, cc2, cc3 = st.columns([1, 4, 2])
+                cc1, cc2, cc3 = st.columns([4, 4, 3])
                 with cc1:
-                    img_url = str(img).strip()
-                    if img_url and img_url.startswith("http"):
-                        first_img = img_url.split(",")[0].strip()
-                        st.image(first_img, width=80)
-                    else:
-                        st.markdown(
-                            """<div style="width:80px;height:80px;background:#eee;border-radius:8px;"""
-                            """display:flex;align-items:center;justify-content:center;font-size:24px">🖼</div>""",
-                            unsafe_allow_html=True)
+                    st.markdown(f"""
+                    <div style="display:flex;gap:12px;align-items:center;direction:rtl;">
+                        {img_tag_new}
+                        <div>
+                            <div style="font-size:0.75rem;color:#e65100;font-weight:900;margin-bottom:3px;">🆕 المنتج الجديد:</div>
+                            <div style="font-size:0.9rem;font-weight:800;line-height:1.3;color:#1a1208;">{srow['الاسم الجديد']}</div>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
                 with cc2:
                     st.markdown(f"""
-                    <div style="direction:rtl">
-                      <div style="font-weight:800;font-size:0.95rem">{srow['الاسم الجديد']}</div>
-                      <div style="color:#888;font-size:0.8rem">أقرب تطابق: {srow['أقرب تطابق في المتجر']}</div>
-                      <div class="cmp-pct">{pct}% تشابه</div>
+                    <div style="display:flex;gap:12px;align-items:center;direction:rtl;">
+                        {img_tag_store}
+                        <div>
+                            <div style="font-size:0.75rem;color:#1976d2;font-weight:900;margin-bottom:3px;">🏪 أقرب منتج بالمتجر:</div>
+                            <div style="font-size:0.9rem;font-weight:800;line-height:1.3;color:#555;">{store_match_name}</div>
+                        </div>
                     </div>
                     """, unsafe_allow_html=True)
                 with cc3:
+                    st.markdown(
+                        f"<div class='cmp-pct' style='text-align:center;margin-bottom:6px;'>{pct}% تشابه</div>",
+                        unsafe_allow_html=True)
                     col_ap, col_cn = st.columns(2)
                     with col_ap:
                         if st.button("✅ اعتماد", key=f"ap_{idx}",
