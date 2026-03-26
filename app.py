@@ -551,6 +551,7 @@ def _init_state():
         "pipe_filter_stats":   None,  # dict إحصائيات آخر تطبيق للفلاتر
         "pipe_store_dedup_dropped": 0,  # صفوف أُزيلت لأنها موجودة في ملف المتجر
         "pipe_missing_brands_df": None,  # ماركات غير معروفة مستخرجة من المنافسين
+        "pipe_session_brands": [],  # ماركات أُثريت/أُضيفت في نفس جلسة المسار (Audit #14)
         # Page
         "page":           "pipeline",
     }
@@ -1345,12 +1346,64 @@ def brand_exists_in_brands_df(brand_name: str, bdf: Optional[pd.DataFrame]) -> b
                 return True
             if len(pk) >= 3 and len(bn_norm) >= 3 and (pk in bn_norm or bn_norm in pk):
                 return True
+    # مقارنة موحّدة (أ/إ/آ→ا، ة→ه) لتفادي تكرار «أكوا» و«اكوا»
+    bn_v2 = normalize_brand_name_v2(str(brand_name).split("|")[0].strip())
+    if len(bn_v2) >= 2:
+        for _, row in bdf.iterrows():
+            raw = str(row[col0])
+            for part in re.split(r"\s*\|\s*", raw):
+                if part.strip() and normalize_brand_name_v2(part) == bn_v2:
+                    return True
     return False
 
 
+def normalize_brand_name_v2(s: str) -> str:
+    """توحيد اسم العلامة للمقارنة: ألف/همزات → ا، ة → ه، مسافات."""
+    if not s:
+        return ""
+    t = unicodedata.normalize("NFKC", str(s).strip())
+    for a in ("أ", "إ", "آ", "ٱ"):
+        t = t.replace(a, "ا")
+    t = t.replace("ة", "ه")
+    t = re.sub(r"\s+", " ", t).strip()
+    return t.lower()
+
+
+def _brand_in_session_runtime(brand_name: str) -> bool:
+    """هل الماركة مُسجّلة في ذاكرة الجلسة الحالية (بعد إثراء أو توليد)."""
+    bn = normalize_brand_name_v2(brand_name)
+    if not bn or len(bn) < 2:
+        return False
+    for b in st.session_state.get("pipe_session_brands", []):
+        raw = str(b.get("name", "") or "")
+        if normalize_brand_name_v2(raw) == bn:
+            return True
+        for part in re.split(r"\s*\|\s*", raw):
+            if part.strip() and normalize_brand_name_v2(part) == bn:
+                return True
+    return False
+
+
+def register_pipe_session_brand(display_name: str, page_url: str = "") -> None:
+    """يُحدّث قائمة ماركات الجلسة حتى يتعرّف match_brand على العلامة في نفس التشغيل."""
+    if not str(display_name or "").strip():
+        return
+    low = str(display_name).strip().lower()
+    if low in ("unknown", "غير محدد", "غير معروف"):
+        return
+    lst = st.session_state.setdefault("pipe_session_brands", [])
+    norm = normalize_brand_name_v2(display_name)
+    for x in lst:
+        if normalize_brand_name_v2(x.get("name", "")) == norm:
+            return
+    lst.append({"name": str(display_name).strip(), "page_url": str(page_url or "").strip()})
+
+
 def brand_exists_in_catalog(brand_name: str) -> bool:
-    """يتحقق إن كانت الماركة (أو أحد أجزائها بعد |) موجودة في ملف ماركات المتجر."""
-    return brand_exists_in_brands_df(brand_name, st.session_state.brands_df)
+    """يتحقق إن كانت الماركة (أو أحد أجزائها بعد |) موجودة في ملف ماركات المتجر أو جلسة المسار."""
+    if brand_exists_in_brands_df(brand_name, st.session_state.brands_df):
+        return True
+    return _brand_in_session_runtime(brand_name)
 
 
 def dedupe_products_df(df: pd.DataFrame) -> pd.DataFrame:
@@ -2073,10 +2126,20 @@ def clean_brand_name(brand_raw: str) -> str:
 
 
 def match_brand(name: str) -> dict:
-    bdf = st.session_state.brands_df
-    if bdf is None or not str(name).strip():
+    if not str(name).strip():
         return {"name": "", "page_url": ""}
     nl = str(name).lower()
+    for b in st.session_state.get("pipe_session_brands", []):
+        raw = str(b.get("name", "") or "")
+        if not raw:
+            continue
+        for part in re.split(r"\s*\|\s*", raw):
+            p = part.strip().lower()
+            if p and p in nl:
+                return {"name": raw, "page_url": str(b.get("page_url", "") or "")}
+    bdf = st.session_state.brands_df
+    if bdf is None:
+        return {"name": "", "page_url": ""}
     col0 = bdf.columns[0]
     for _, row in bdf.iterrows():
         raw = str(row[col0])
@@ -2136,7 +2199,7 @@ def generate_new_brand(brand_name: str) -> dict:
 
     slug = to_slug(en_name)
     display_name = formatted_name.split("|")[0].strip() if "|" in formatted_name else formatted_name
-    return {
+    out = {
         "name":                                          display_name,
         "page_url":                                      slug,
         "اسم الماركة":                                   formatted_name,
@@ -2147,6 +2210,11 @@ def generate_new_brand(brand_name: str) -> dict:
         "(SEO Page URL) رابط صفحة العلامة التجارية":    slug,
         "(Page Description) وصف صفحة العلامة التجارية": f"تسوّق أحدث عطور {formatted_name} الأصلية الفاخرة بأسعار حصرية من متجر مهووس.",
     }
+    register_pipe_session_brand(
+        out.get("اسم الماركة", "") or "",
+        out.get("(SEO Page URL) رابط صفحة العلامة التجارية", "") or "",
+    )
+    return out
 
 
 def match_category(name: str, gender: str = "") -> str:
@@ -3887,25 +3955,69 @@ def _clean_product_name_for_brand_search(name: str) -> str:
     return txt
 
 
-def _extract_brand_from_name_first_words(name: str) -> str:
-    """Fallback فقط: استنتاج ماركة من أول 1-2 كلمة بعد التنظيف."""
-    if not name:
+def _strip_brand_entity_stopwords(text: str) -> str:
+    """إزالة كلمات التوقف قبل استخراج/عرض اسم العلامة (تستر، عطر، بخاخ، …)."""
+    t = str(text or "").strip()
+    if not t:
         return ""
-    n = _clean_product_name_for_brand_search(name)
-    words = [w for w in n.split() if w and w not in ("-", "—", "–")]
-    if not words:
+    for sw in _BRAND_STOP_WORDS:
+        sw_l = str(sw).lower().strip()
+        if sw_l:
+            t = re.sub(re.escape(sw_l), " ", t, flags=re.IGNORECASE)
+    for sw in ("بخاخ", "بخاخات", "مجموعه", "معطر جسم", "معطر شعر"):
+        t = re.sub(re.escape(sw), " ", t, flags=re.IGNORECASE)
+    t = re.sub(r"\s+", " ", t).strip()
+    return t
+
+
+def _extract_brand_entity_with_ai(product_name: str, api_key: str) -> str:
+    """استخراج اسم العلامة فقط عبر Claude؛ يعيد الاسم أو 'Unknown' عند عدم اليقين."""
+    if not product_name or not api_key or not HAS_ANTHROPIC:
         return ""
-    cands = []
-    if len(words) >= 2:
-        cands.append(" ".join(words[:2]))
-    cands.append(words[0])
-    for c in cands:
-        if is_discount_like_brand(c):
-            continue
-        if re.fullmatch(r"[\d\W_]+", c):
-            continue
-        return _normalize_simple_brand_token(c)
-    return ""
+    try:
+        cache = st.session_state.setdefault("_brand_entity_ai_cache", {})
+        ck = str(product_name).strip()[:2000]
+        if ck in cache:
+            return cache[ck]
+        pre = _strip_brand_entity_stopwords(
+            _clean_product_name_for_brand_search(product_name)
+        )
+        if not pre.strip():
+            cache[ck] = "Unknown"
+            return "Unknown"
+        client = anthropic.Anthropic(api_key=api_key)
+        prompt = (
+            "You extract ONLY the official fragrance house / brand name from a product title.\n"
+            "Return a single JSON object only: {\"brand\":\"...\"}\n"
+            "Rules:\n"
+            "- brand = the house name (use established English spelling when the house is global).\n"
+            "- Never return generic product words (perfume, tester, set, spray, deodorant, body mist).\n"
+            "- Do NOT mistranslate English brand names into Arabic "
+            "(e.g. 'The Merchant of Venice' must stay English — never return 'تاجر' alone).\n"
+            "- If you cannot name the brand confidently, return exactly: Unknown\n\n"
+            f"Product title:\n{pre}\n"
+        )
+        msg = client.messages.create(
+            model="claude-3-haiku-20240307",
+            max_tokens=120,
+            temperature=0.0,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        raw = msg.content[0].text.strip()
+        data = _parse_json_object_from_llm_text(raw, context="extract_brand_entity")
+        b = str(data.get("brand", "") or "").strip()
+        if not b or b.lower() == "unknown":
+            cache[ck] = "Unknown"
+            return "Unknown"
+        b = _strip_brand_entity_stopwords(b)
+        b = _normalize_simple_brand_token(b)
+        if not b:
+            cache[ck] = "Unknown"
+            return "Unknown"
+        cache[ck] = b
+        return b
+    except Exception:
+        return "Unknown"
 
 
 def _fuzzy_ratio_local(a: str, b: str) -> float:
@@ -3969,12 +4081,15 @@ def _build_missing_brands_df_from_competitors(
     name_col: str,
     known_brands: list,
     threshold: float = 85.0,
+    api_key: str = "",
 ) -> pd.DataFrame:
     if comp_df is None or comp_df.empty or name_col not in comp_df.columns:
         return pd.DataFrame(columns=SALLA_BRANDS_COLS)
+    if not api_key or not HAS_ANTHROPIC:
+        APP_LOG.warning("missing brands: AI brand extraction skipped (no API key)")
+        return pd.DataFrame(columns=SALLA_BRANDS_COLS)
     rows = []
     seen = set()
-    # sort by length so multi-word brands match first
     known_sorted = sorted(
         [k for k in known_brands if str(k).strip()],
         key=lambda x: len(str(x)),
@@ -3984,42 +4099,45 @@ def _build_missing_brands_df_from_competitors(
         cleaned = _clean_product_name_for_brand_search(nm)
         if not cleaned:
             continue
+        cleaned_n = normalize_brand_name_v2(cleaned)
 
-        # Reverse dictionary search: if known brand exists anywhere, skip
-        matched_known = ""
+        matched_known = False
         for kb in known_sorted:
-            kb_n = _normalize_simple_brand_token(str(kb)).lower()
-            if not kb_n or len(kb_n) < 2:
+            kb_n = normalize_brand_name_v2(str(kb))
+            if len(kb_n) < 2:
                 continue
-            if re.search(rf"(?<!\w){re.escape(kb_n)}(?!\w)", cleaned, flags=re.IGNORECASE):
-                matched_known = kb
+            if kb_n in cleaned_n or cleaned_n in kb_n:
+                matched_known = True
+                break
+            kb_raw = _normalize_simple_brand_token(str(kb)).lower()
+            if kb_raw and len(kb_raw) >= 3 and re.search(
+                rf"(?<!\w){re.escape(kb_raw)}(?!\w)", cleaned, flags=re.IGNORECASE
+            ):
+                matched_known = True
                 break
         if matched_known:
             continue
 
-        # Fallback guess only when no known brand is found
-        cand = _extract_brand_from_name_first_words(cleaned)
-        if not cand:
+        cand = _extract_brand_entity_with_ai(nm, api_key)
+        if not cand or cand == "Unknown":
             continue
-
-        # إذا استنتجنا ماركة جديدة (Fallback)، نزيل كلمات/عبارات التستر/العطر... بشكل عدواني
-        # قبل حفظها كـ "ماركة مفقودة" حتى لا تتجاوز القاموس وتُوسَم خطأ.
-        cand = re.sub(r"(?:تستر|عطر|طقم|مجموعة)", " ", cand, flags=re.IGNORECASE)
-        cand = re.sub(r"مزيل\s+عرق", " ", cand, flags=re.IGNORECASE)
-        cand = re.sub(r"\s+", " ", cand).strip()
+        cand = _strip_brand_entity_stopwords(cand)
         cand = _normalize_simple_brand_token(cand)
         if not cand:
             continue
 
         best_score = 0.0
         for kb in known_brands:
-            sc = _fuzzy_ratio_local(cand, kb)
+            sc = _fuzzy_ratio_local(
+                normalize_brand_name_v2(cand),
+                normalize_brand_name_v2(str(kb)),
+            )
             if sc > best_score:
                 best_score = sc
         if best_score >= threshold:
             continue
-        key = cand.lower()
-        if key in seen:
+        key = normalize_brand_name_v2(cand)
+        if not key or key in seen:
             continue
         seen.add(key)
         rows.append({
@@ -4034,6 +4152,27 @@ def _build_missing_brands_df_from_competitors(
     return pd.DataFrame(rows, columns=SALLA_BRANDS_COLS)
 
 
+def _finalize_mahwous_brand_page_url(raw_from_ai: str, english_slug_source: str) -> str:
+    """
+    رابط سلة العلامة: أحرف لاتينية صغيرة + شرطات سفلية فقط،
+    ويجب أن ينتهي بـ _mahwous_store (يُكمّل بايثون إن نسي النموذج).
+    """
+    raw = str(raw_from_ai or "").strip().lower()
+    raw = re.sub(r"^https?://", "", raw).split("/")[0].split("?")[0]
+    raw = re.sub(r"[^a-z0-9_-]", "", raw).replace("-", "_")
+    raw = re.sub(r"_+", "_", raw).strip("_")
+    base = raw if raw and re.search(r"[a-z]", raw) else ""
+    if not base:
+        ep = str(english_slug_source or "").strip().lower()
+        base = re.sub(r"[^a-z0-9]+", "_", ep).strip("_")
+    if not base:
+        return ""
+    base = base.replace("_mahwous_store", "").strip("_")
+    if not base:
+        return ""
+    return f"{base}_mahwous_store"
+
+
 def _ai_enrich_brand_row_with_domain(brand_name: str, api_key: str) -> dict:
     empty = {
         "brand_name": "",
@@ -4042,6 +4181,7 @@ def _ai_enrich_brand_row_with_domain(brand_name: str, api_key: str) -> dict:
         "page_url": "",
         "seo_description": "",
         "domain": "",
+        "logo_clearbit_url": "",
     }
     if not brand_name or not api_key or not HAS_ANTHROPIC:
         return empty
@@ -4052,13 +4192,14 @@ def _ai_enrich_brand_row_with_domain(brand_name: str, api_key: str) -> dict:
             f"الماركة: {brand_name}\n\n"
             "أعد JSON فقط بدون أي نص خارج JSON بالمفاتيح التالية حرفياً:\n"
             '{"brand_name":"Arabic_Name | English_Name", "description":"...", "page_title":"...", "page_url":"...", "seo_description":"...", "domain":"..."}\n'
-            "الشروط:\n"
-            "- brand_name: بصيغة صارمة \"Arabic_Name | English_Name\" (مع مسافة حول |) و يجب ألا يتجاوز 30 حرفاً بما في ذلك المسافات.\n"
-            "- description: وصف عربي احترافي ومختصر (لا يتجاوز 255 حرفاً).\n"
-            "- page_title: عنوان SEO (لا يتجاوز 70 حرفاً).\n"
-            "- page_url: بصيغة صارمة: \"[english_brand_name]_mahwous_store\" جميع الأحرف صغيرة و المسافات => underscores.\n"
-            "- seo_description: وصف عربي SEO (لا يتجاوز 155 حرفاً).\n"
-            "- domain: الدومين الرسمي فقط بدون http/https أو مسار (مثل: chanel.com).\n"
+            "الشروط الصارمة:\n"
+            "- brand_name: \"Arabic_Name | English_Name\" (مسافة حول |)، حد أقصى 30 حرفاً مع المسافات.\n"
+            "- description: وصف عربي فريد واحترافي (حد أقصى 255 حرفاً)، بدون نسخ قوالب جاهزة.\n"
+            "- page_title: عنوان SEO (حد أقصى 70 حرفاً).\n"
+            "- page_url: الاسم الإنجليزي للماركة فقط بأحرف لاتينية صغيرة؛ المسافات والشرطات تُستبدل بشرطة سفلية؛ "
+            "يجب أن ينتهي بـ _mahwous_store. ممنوع أي حرف عربي أو رموز داخل page_url.\n"
+            "- seo_description: وصف عربي SEO (حد أقصى 155 حرفاً).\n"
+            "- domain: الدومين الرسمي للماركة فقط (مثل chanel.com) بدون http/https أو www أو مسار.\n"
             "- إذا تعذر تحديد أي حقل بدقة اعده كسلسلة فارغة فقط."
         )
         msg = client.messages.create(
@@ -4078,6 +4219,7 @@ def _ai_enrich_brand_row_with_domain(brand_name: str, api_key: str) -> dict:
         seo_desc = str(data.get("seo_description", "") or "").strip()
         dom = str(data.get("domain", "") or "").strip().lower()
         dom = re.sub(r"^https?://", "", dom).split("/")[0].strip()
+        dom = re.sub(r"^www\.", "", dom)
         if dom and "." not in dom:
             dom = ""
 
@@ -4130,14 +4272,14 @@ def _ai_enrich_brand_row_with_domain(brand_name: str, api_key: str) -> dict:
             else:
                 bn_final = bn_final[:30].rstrip()
 
-        # compute page_url strictly from English brand part
         en_part = ""
         if "|" in bn_final:
             en_part = bn_final.split("|", 1)[1].strip()
-        en_part = en_part.lower()
-        en_part = re.sub(r"[^a-z0-9\s_]", "", en_part)
-        en_part = re.sub(r"\s+", "_", en_part).strip("_")
-        page_url = f"{en_part}_mahwous_store" if en_part else ""
+        en_slug = en_part.lower()
+        en_slug = re.sub(r"[^a-z0-9\s_]", "", en_slug)
+        en_slug = re.sub(r"\s+", "_", en_slug).strip("_")
+        cl_url = str(data.get("page_url", "") or "").strip()
+        page_url = _finalize_mahwous_brand_page_url(cl_url, en_slug)
 
         return {
             "brand_name": bn_final,
@@ -4146,6 +4288,7 @@ def _ai_enrich_brand_row_with_domain(brand_name: str, api_key: str) -> dict:
             "page_url": page_url,
             "seo_description": seo_desc,
             "domain": dom,
+            "logo_clearbit_url": (f"https://logo.clearbit.com/{dom}" if dom else ""),
         }
     except Exception:
         return empty
@@ -4670,9 +4813,12 @@ if st.session_state.page == "pipeline":
             st.session_state.pipe_approved   = None
             st.session_state.pipe_export_df  = None
             st.session_state.pipe_new_brands = []
+            st.session_state.pipe_session_brands = []
             st.session_state.pipe_seo_df     = None
             st.session_state.pipe_store_dedup_dropped = 0
             st.session_state.pipe_missing_brands_df = None
+            if "_brand_entity_ai_cache" in st.session_state:
+                del st.session_state["_brand_entity_ai_cache"]
             st.session_state.pipe_running    = True
             st.session_state.pipe_step       = 2
 
@@ -4731,6 +4877,7 @@ if st.session_state.page == "pipeline":
                     name_col=comp_nm,
                     known_brands=known_brands,
                     threshold=80.0,
+                    api_key=st.session_state.get("api_key") or "",
                 )
                 if not mb_df.empty:
                     st.session_state.pipe_missing_brands_df = mb_df
@@ -4863,8 +5010,11 @@ if st.session_state.page == "pipeline":
             final_rows = []
             seo_rows   = []
             new_brands_found = []
-            known_brand_names = set(b.get("اسم الماركة","").lower()
-                                    for b in st.session_state.new_brands)
+            known_brand_names = set()
+            for b in st.session_state.new_brands:
+                nm = b.get("اسم الماركة", "") or ""
+                if str(nm).strip():
+                    known_brand_names.add(normalize_brand_name_v2(nm))
 
             conc_map_ar = {
                 "EDP": "أو دو بارفيوم", "EDT": "أو دو تواليت",
@@ -4933,25 +5083,14 @@ if st.session_state.page == "pipeline":
                     is_new_generated = False
 
                     if not brand_d.get("name") and not prow_brand:
-                        tmp_name = pname
-                        for _ in range(3):
-                            tmp_name = re.sub(
-                                r"^(تستر|تيستر|عطر|طقم|مجموعة|معطر|جسم|شعر|بخاخ|زيت|مزيل|عرق|لوشن|كريم|بودي|شامبو|بلسم|مسكرة|حقيبة|ميني|عينة|سمبل)\s+",
-                                "", tmp_name, flags=re.IGNORECASE).strip()
-                        words = [w for w in tmp_name.split() if not _is_junk_brand_token(w)]
-                        possible_brand = " ".join(words[:2]) if len(words) >= 2 else (words[0] if words else "")
-                        if possible_brand and is_discount_like_brand(possible_brand):
-                            possible_brand = ""
-                        if possible_brand:
-                            possible_brand = clean_brand_name(possible_brand) or (
-                                possible_brand if not is_discount_like_brand(possible_brand) else ""
-                            )
-                        if possible_brand:
-                            brand_d = match_brand(possible_brand)
-                            if not brand_d.get("name") and len(words) >= 2:
-                                brand_d = match_brand(words[0])
-                            if not brand_d.get("name"):
-                                prow_brand = possible_brand
+                        api_k = st.session_state.get("api_key")
+                        if api_k and HAS_ANTHROPIC:
+                            ext = _extract_brand_entity_with_ai(pname, api_k)
+                            if ext and ext != "Unknown":
+                                ext = _strip_brand_entity_stopwords(ext)
+                                brand_d = match_brand(ext)
+                                if not brand_d.get("name"):
+                                    prow_brand = ext
 
                     if not brand_d.get("name") and prow_brand:
                         brand_d = generate_new_brand(prow_brand)
@@ -4969,8 +5108,8 @@ if st.session_state.page == "pipeline":
                         and str(brand_d["name"]).strip() != "غير محدد"
                         and not brand_exists_in_catalog(brand_d["name"])
                     ):
-                        bn_low = brand_d["name"].lower()
-                        if bn_low not in known_brand_names:
+                        bn_key = normalize_brand_name_v2(brand_d["name"])
+                        if bn_key and bn_key not in known_brand_names:
                             if is_new_generated:
                                 new_brands_found.append(brand_d.copy())
                             else:
@@ -4985,7 +5124,11 @@ if st.session_state.page == "pipeline":
                                     "(SEO Page URL) رابط صفحة العلامة التجارية":    brand_d.get("page_url", to_slug(brand_d["name"])),
                                     "(Page Description) وصف صفحة العلامة التجارية": f"تسوّق أحدث عطور {brand_d['name']} الأصلية بأسعار حصرية من متجر مهووس.",
                                 })
-                            known_brand_names.add(bn_low)
+                                register_pipe_session_brand(
+                                    brand_d["name"],
+                                    brand_d.get("page_url", to_slug(brand_d["name"])),
+                                )
+                            known_brand_names.add(bn_key)
 
                     pname  = standardize_product_name(pname, brand_d.get("name", ""))
                     cat    = match_category(pname, gender_kw)
@@ -5323,7 +5466,10 @@ if st.session_state.page == "pipeline":
         if mb_df is not None and not mb_df.empty:
             st.markdown("""<hr class="gdiv"><div class="sec-title"><div class="bar"></div>
             <h3>ماركات مفقودة للرفع أولاً</h3></div>""", unsafe_allow_html=True)
-            st.caption("تم استخراجها من أول كلمات اسم المنتج في ملفات المنافسين لأنها غير موجودة في مرجع الماركات (عتبة تطابق 80٪).")
+            st.caption(
+                "تم استخراج اسم العلامة عبر الذكاء الاصطناعي من عنوان المنتج (بدون افتراض «أول كلمتين») "
+                "لأنها غير موجودة في مرجع الماركات (عتبة تطابق 80٪ بعد التوحيد)."
+            )
             if st.button("✨ بدء الإثراء بالذكاء الاصطناعي", key="pipe_enrich_missing_brands", type="primary"):
                 if not st.session_state.api_key:
                     st.error("أضف مفتاح Anthropic API من صفحة الإعدادات أولاً.")
@@ -5342,8 +5488,18 @@ if st.session_state.page == "pipeline":
                             w.at[w.index[i], "وصف مختصر عن الماركة"] = ai_b["description"]
                         if ai_b.get("seo_description"):
                             w.at[w.index[i], "(Page Description) وصف صفحة العلامة التجارية"] = ai_b["seo_description"]
-                        dom = ai_b.get("domain", "")
-                        w.at[w.index[i], "صورة شعار الماركة"] = f"https://logo.clearbit.com/{dom}" if dom else ""
+                        dom = str(ai_b.get("domain", "") or "").strip().lower()
+                        dom = re.sub(r"^https?://", "", dom).split("/")[0].strip()
+                        dom = re.sub(r"^www\.", "", dom)
+                        logo_u = (ai_b.get("logo_clearbit_url") or "").strip()
+                        if not logo_u and dom and "." in dom:
+                            logo_u = f"https://logo.clearbit.com/{dom}"
+                        w.at[w.index[i], "صورة شعار الماركة"] = logo_u
+                        if ai_b.get("brand_name"):
+                            register_pipe_session_brand(
+                                ai_b["brand_name"],
+                                ai_b.get("page_url", "") or "",
+                            )
                         if ai_b.get("page_title"):
                             w.at[w.index[i], "(Page Title) عنوان صفحة العلامة التجارية"] = ai_b["page_title"]
                         else:
@@ -5386,9 +5542,12 @@ if st.session_state.page == "pipeline":
             st.session_state.pipe_approved   = None
             st.session_state.pipe_export_df  = None
             st.session_state.pipe_new_brands = []
+            st.session_state.pipe_session_brands = []
             st.session_state.pipe_missing_brands_df = None
             st.session_state.pipe_seo_df     = None
             st.session_state.pipe_step       = 0
+            if "_brand_entity_ai_cache" in st.session_state:
+                del st.session_state["_brand_entity_ai_cache"]
             st.rerun()
 
         st.markdown("""<div class="al-info" style="margin-top:14px">
