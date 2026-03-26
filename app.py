@@ -499,8 +499,8 @@ def _init_state():
         st.session_state.page = "pipeline"
     if st.session_state.get("page") in ("competitor_gap", "new_products_filter"):
         st.session_state.page = "pipeline"
-    if st.session_state.get("page") in ("store_audit", "store_checker"):
-        st.session_state.page = "compare"
+    if st.session_state.get("page") == "store_checker":
+        st.session_state.page = "store_audit"
 
     # Auto-load bundled reference CSVs
     if st.session_state.brands_df is None:
@@ -948,9 +948,6 @@ def render_quick_add_tab():
             missing_brand_names: list[str] = []
 
             for idx, u in enumerate(urls):
-                if st.session_state.get("test_mode"):
-                    if idx >= 5:
-                        break
                 progress_bar.progress(int((idx / max(len(urls), 1)) * 100), text=f"معالجة: {u[:55]}...")
                 with st.spinner(f"استخراج: {u[:60]}..."):
                     extracted = extract_product_json_from_url(u, api_key=api_key)
@@ -2930,7 +2927,8 @@ with st.sidebar:
 
     PAGES = [
         ("🚀", "المسار الآلي",           "pipeline"),
-        ("🔀", "المقارنة والتدقيق",     "compare"),
+        ("🔀", "المقارنة",              "compare"),
+        ("🏪", "مدقق ملف المتجر",       "store_audit"),
         ("🔍", "معالج الـ SEO",          "seo_processor"),
         ("➕", "منتج سريع",              "quickadd"),
         ("⚙️", "الإعدادات",             "settings"),
@@ -2943,12 +2941,6 @@ with st.sidebar:
             st.session_state.page = key
             st.rerun()
 
-    st.divider()
-    st.checkbox(
-        "🧪 وضع التجربة (معالجة 5 منتجات فقط)",
-        key="test_mode",
-        help="يقصر المعالجة على أول 5 صفوف (منافسين / SEO / مقارنة / فحص). ملف المتجر يبقى كاملاً للمطابقة.",
-    )
     st.divider()
     # Status
     bok = st.session_state.brands_df is not None
@@ -3036,7 +3028,8 @@ with st.sidebar:
 TITLES = {
     "pipeline":      ("🚀 المسار الآلي",            "مقارنة → فلترة AI → معالجة → جدول تفاعلي → تصدير منتج جديد.csv"),
     "seo_processor": ("🔍 معالج الـ SEO",           "توليد روابط وعناوين وأوصاف SEO بتنسيق سلة — ذكاء اصطناعي"),
-    "compare":       ("🔀 المقارنة والتدقيق",       "مقارنة المنافسين مع المتجر — تدقيق ملف المتجر والأسعار"),
+    "compare":       ("🔀 المقارنة",                "مقارنة المنافسين مع المتجر واعتماد النتائج بصرياً"),
+    "store_audit":   ("🏪 مدقق ملف المتجر",         "فحص ملف المتجر — اكتشاف النواقص — إصلاح وتصدير بتنسيق سلة"),
     "quickadd":      ("➕ منتج سريع",              "أدخل رابط منتج أو ارفع صورة وسيكمل النظام الباقي"),
     "settings":      ("⚙️ الإعدادات",             "مفاتيح API وقواعد البيانات المرجعية"),
 }
@@ -3122,8 +3115,6 @@ def render_compare_tab():
                     if st.session_state.brands_df is not None:
                         brands_l = (st.session_state.brands_df[st.session_state.brands_df.columns[0]]
                                     .dropna().astype(str).str.strip().tolist())
-                    if st.session_state.get("test_mode"):
-                        new_df = new_df.head(5)
                     with st.spinner("جاري المقارنة..."):
                         res_df = run_smart_comparison(
                             new_df=new_df,
@@ -3370,8 +3361,6 @@ def render_store_audit_tab():
                 if a_pr == NONE_A or a_cost == NONE_A:
                     st.error("حدد عمود 'السعر' وعمود 'سعر التكلفة' لتدقيق الهامش.")
                     st.stop()
-                if st.session_state.get("test_mode"):
-                    audit_df = audit_df.head(5)
                 total = len(audit_df)
                 for i, row in audit_df.iterrows():
                     if i % 10 == 0:
@@ -3881,9 +3870,6 @@ if st.session_state.page == "pipeline":
                 st.session_state.pipe_running = False
                 st.session_state.pipe_step = 1
                 st.stop()
-
-            if st.session_state.get("test_mode"):
-                comp_merged = comp_merged.head(5)
 
             # ══ STEP 2: المقارنة ══════════════════════════════════
             status_ph = st.empty()
@@ -4447,8 +4433,6 @@ elif st.session_state.page == "seo_processor":
             if not st.session_state.api_key:
                 st.error("أضف مفتاح Anthropic API من صفحة الإعدادات.")
             else:
-                if st.session_state.get("test_mode"):
-                    sdf = sdf.head(5)
                 prog = st.progress(0)
                 st.session_state._seo_batch_prog = prog
                 full_seo, gen_only = generate_seo_for_products_dataframe(sdf)
@@ -4485,20 +4469,20 @@ elif st.session_state.page == "seo_processor":
 
 
 # ╔══════════════════════════════════════════════════════════════════╗
-# ║  PAGE — COMPARE & AUDIT (routed)                                ║
+# ║  PAGE — COMPARE (routed)                                        ║
 # ╚══════════════════════════════════════════════════════════════════╝
 elif st.session_state.page == "compare":
 
     st.markdown("""<div class="al-info">
-    <b>المقارنة والتدقيق:</b> استخدم التبويبات — <b>مقارنة المنافسين</b> لمراجعة الملفات الجديدة مقابل المتجر،
-    أو <b>تدقيق ملف المتجر</b> لاكتشاف النواقص وتدقيق الأسعار والتكلفة.
+    <b>المقارنة:</b> راجع نتائج مقارنة المنافسين مع ملف المتجر، ثم اعتمد أو عدّل النتائج قبل التصدير.
     </div>""", unsafe_allow_html=True)
+    render_compare_tab()
 
-    _t_cmp, _t_sa = st.tabs(["مقارنة المنافسين", "تدقيق ملف المتجر"])
-    with _t_cmp:
-        render_compare_tab()
-    with _t_sa:
-        render_store_audit_tab()
+# ╔══════════════════════════════════════════════════════════════════╗
+# ║  PAGE — STORE AUDIT (routed)                                    ║
+# ╚══════════════════════════════════════════════════════════════════╝
+elif st.session_state.page == "store_audit":
+    render_store_audit_tab()
 
 # ╔══════════════════════════════════════════════════════════════════╗
 # ║  PAGE 3 — QUICK ADD                                             ║
