@@ -3044,6 +3044,134 @@ st.markdown(f"""
 # ╔══════════════════════════════════════════════════════════════════╗
 # ║  PAGE — COMPARE & AUDIT (helpers)                               ║
 # ╚══════════════════════════════════════════════════════════════════╝
+def _pick_first_non_http_text_col(df: pd.DataFrame) -> str:
+    """Fallback: pick first text column that is not mostly URLs."""
+    txt_cols = [c for c in df.columns if pd.api.types.is_object_dtype(df[c]) or pd.api.types.is_string_dtype(df[c])]
+    for c in txt_cols:
+        s = df[c].fillna("").astype(str).str.strip()
+        nz = s[s != ""]
+        if nz.empty:
+            continue
+        http_ratio = nz.str.contains(r"https?://", case=False, regex=True).mean()
+        if http_ratio < 0.5:
+            return c
+    return txt_cols[0] if txt_cols else ""
+
+
+def _guess_competitor_name_col(df: pd.DataFrame) -> str:
+    """Smart guessing for raw scraped competitor files."""
+    if "أسم المنتج" in df.columns:
+        return "أسم المنتج"
+    g = auto_guess_col(
+        df.columns,
+        ["أسم المنتج", "اسم المنتج", "name", "title", "product", "styles_productcard", "styles_productCard"],
+        df,
+    )
+    if g and g != "— لا يوجد —":
+        return g
+    # fallback: first text-like col not dominated by URLs
+    return _pick_first_non_http_text_col(df)
+
+
+def _guess_competitor_price_col(df: pd.DataFrame) -> str:
+    if "سعر المنتج" in df.columns:
+        return "سعر المنتج"
+    g = auto_guess_col(
+        df.columns,
+        ["سعر المنتج", "السعر", "price", "text-sm", "amount", "value"],
+        df,
+    )
+    if g and g != "— لا يوجد —":
+        return g
+    return ""
+
+
+def _read_competitor_file(df_raw: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
+    """
+    Normalize competitor file columns into app-friendly names.
+    - Map guessed name col -> 'أسم المنتج'
+    - Map guessed price col -> 'سعر المنتج'
+    """
+    if df_raw is None or df_raw.empty:
+        return pd.DataFrame(), {"name_col": "", "price_col": "", "rows_before": 0, "rows_after": 0}
+
+    df = df_raw.copy()
+    name_col = _guess_competitor_name_col(df)
+    price_col = _guess_competitor_price_col(df)
+
+    # rename safely without overriding an existing canonical column
+    if name_col and name_col != "أسم المنتج" and "أسم المنتج" not in df.columns:
+        df = df.rename(columns={name_col: "أسم المنتج"})
+    if price_col and price_col != "سعر المنتج" and "سعر المنتج" not in df.columns:
+        df = df.rename(columns={price_col: "سعر المنتج"})
+
+    # last-resort name col
+    if "أسم المنتج" not in df.columns:
+        fb = _pick_first_non_http_text_col(df)
+        if fb:
+            df = df.rename(columns={fb: "أسم المنتج"})
+            name_col = fb
+
+    # remove fully-empty rows
+    df = df.dropna(how="all").reset_index(drop=True)
+    return df, {
+        "name_col": "أسم المنتج" if "أسم المنتج" in df.columns else name_col,
+        "price_col": "سعر المنتج" if "سعر المنتج" in df.columns else price_col,
+        "rows_before": len(df_raw),
+        "rows_after": len(df),
+    }
+
+
+def apply_competitor_exclusions(
+    df: pd.DataFrame,
+    name_col: str = "أسم المنتج",
+    *,
+    exclude_samples: bool = True,
+    exclude_makeup: bool = True,
+    exclude_accessories: bool = True,
+    exclude_missing_sizes: bool = True,
+) -> tuple[pd.DataFrame, dict]:
+    """Apply exclusions ONLY on competitor data before comparison."""
+    if df is None or df.empty or name_col not in df.columns:
+        return df, {"input_rows": 0, "output_rows": 0}
+
+    work = df.copy()
+    names = work[name_col].fillna("").astype(str)
+    nl = names.str.lower()
+    is_tester = nl.str.contains(r"(?:\btester\b|تستر|تيستر)", regex=True, na=False)
+
+    sample_kw = r"(?:عينة|سمبل|فايال|\bvial\b|\bsample\b)"
+    sample_size = r"\b[1-8]\s*(?:مل|ml)\b"
+    makeup_kw = r"(?:مكياج|ارواج|روج|ماسكارا|فاونديشن|ظل|بلشر|كونسيلر)"
+    acc_kw = r"(?:شنطة|كيس|تغليف|كرتون|مبخرة|فحم|ميدالية)"
+    has_size = nl.str.contains(r"(?:مل|ml|oz|غرام|جرام)", regex=True, na=False)
+
+    drop_sample = (nl.str.contains(sample_kw, regex=True, na=False) | nl.str.contains(sample_size, regex=True, na=False)) & (~is_tester)
+    drop_makeup = nl.str.contains(makeup_kw, regex=True, na=False)
+    drop_acc = nl.str.contains(acc_kw, regex=True, na=False)
+    drop_no_size = ~has_size
+
+    mask = pd.Series(False, index=work.index)
+    stats = {"input_rows": len(work), "dropped_samples": 0, "dropped_makeup": 0, "dropped_accessories": 0, "dropped_missing_sizes": 0}
+
+    if exclude_samples:
+        mask |= drop_sample
+        stats["dropped_samples"] = int(drop_sample.sum())
+    if exclude_makeup:
+        mask |= drop_makeup
+        stats["dropped_makeup"] = int(drop_makeup.sum())
+    if exclude_accessories:
+        mask |= drop_acc
+        stats["dropped_accessories"] = int(drop_acc.sum())
+    if exclude_missing_sizes:
+        mask |= drop_no_size
+        stats["dropped_missing_sizes"] = int(drop_no_size.sum())
+
+    out = work.loc[~mask].copy()
+    stats["output_rows"] = len(out)
+    return out, stats
+
+
 def render_compare_tab():
 
         st.markdown("""<div class="al-info">
@@ -3064,9 +3192,14 @@ def render_compare_tab():
                 if dfn.empty:
                     dfn = read_file(up_n, salla_2row=False)
                 if not dfn.empty:
-                    st.session_state.cmp_new_df = dfn
+                    dfn_norm, map_info = _read_competitor_file(dfn)
+                    st.session_state.cmp_new_df = dfn_norm
                     st.session_state.cmp_from_pipe = False
-                    st.success(f"✅ {len(dfn)} منتج")
+                    st.success(f"✅ {len(dfn_norm)} منتج")
+                    if map_info.get("name_col") != "أسم المنتج":
+                        st.caption(f"تم تعيين عمود الاسم تلقائياً من: `{map_info.get('name_col', '')}`")
+                    if map_info.get("price_col") and map_info.get("price_col") != "سعر المنتج":
+                        st.caption(f"تم تعيين عمود السعر تلقائياً من: `{map_info.get('price_col', '')}`")
         with c_up2:
             st.markdown("**ملف المتجر الأساسي**")
             up_s = st.file_uploader("CSV / Excel", type=["csv", "xlsx", "xls"], key="cmp_up_store", label_visibility="collapsed")
@@ -3106,18 +3239,43 @@ def render_compare_tab():
             new_img_g = auto_guess_col(new_df.columns, ["صورة", "image", "src"], new_df)
             new_img_g = None if new_img_g == "— لا يوجد —" else new_img_g
             sim_thr = st.slider("عتبة التشابه للمشبوه (%):", 50, 95, 75, key="cmp_sim")
+            st.markdown("**فلاتر استبعاد المنافسين (تُطبق على ملف المنافس فقط):**")
+            fx1, fx2, fx3, fx4 = st.columns(4)
+            with fx1:
+                cmp_fx_samples = st.checkbox("استبعاد العينات", value=True, key="cmp_fx_samples")
+            with fx2:
+                cmp_fx_makeup = st.checkbox("استبعاد المكياج", value=True, key="cmp_fx_makeup")
+            with fx3:
+                cmp_fx_accessories = st.checkbox("استبعاد الكماليات", value=True, key="cmp_fx_accessories")
+            with fx4:
+                cmp_fx_missing_size = st.checkbox("استبعاد منتجات بدون حجم", value=True, key="cmp_fx_missing_size")
 
             if st.button("🔍 تشغيل المقارنة والعرض المرئي", type="primary", key="cmp_run", use_container_width=True):
                 if new_nm == NONE_C or st_nm == NONE_C:
                     st.error("حدد عمود الاسم للملفين.")
                 else:
+                    comp_for_compare = new_df.copy()
+                    if "أسم المنتج" not in comp_for_compare.columns and new_nm in comp_for_compare.columns:
+                        comp_for_compare = comp_for_compare.rename(columns={new_nm: "أسم المنتج"})
+                        new_nm = "أسم المنتج"
+                    comp_for_compare, ex_stats = apply_competitor_exclusions(
+                        comp_for_compare,
+                        name_col="أسم المنتج" if "أسم المنتج" in comp_for_compare.columns else new_nm,
+                        exclude_samples=cmp_fx_samples,
+                        exclude_makeup=cmp_fx_makeup,
+                        exclude_accessories=cmp_fx_accessories,
+                        exclude_missing_sizes=cmp_fx_missing_size,
+                    )
+                    if comp_for_compare.empty:
+                        st.error("لا توجد منتجات صالحة بعد تطبيق فلاتر الاستبعاد على ملف المنافس.")
+                        st.stop()
                     brands_l = []
                     if st.session_state.brands_df is not None:
                         brands_l = (st.session_state.brands_df[st.session_state.brands_df.columns[0]]
                                     .dropna().astype(str).str.strip().tolist())
                     with st.spinner("جاري المقارنة..."):
                         res_df = run_smart_comparison(
-                            new_df=new_df,
+                            new_df=comp_for_compare,
                             store_df=store_df,
                             new_name_col=new_nm,
                             store_name_col=st_nm,
@@ -3130,6 +3288,7 @@ def render_compare_tab():
                         st.session_state.cmp_results = res_df
                         st.session_state.cmp_cfg = {
                             "new_nm": new_nm, "st_nm": st_nm, "new_img": new_img_g,
+                            "cmp_ex_stats": ex_stats,
                         }
                         sus = res_df[res_df["الحالة"] == "مشبوه"]
                         st.session_state.cmp_approved = {
@@ -3160,6 +3319,13 @@ def render_compare_tab():
               <div class="stat-box"><div class="n" style="color:#43a047">{len(new_clean)}</div><div class="lb">جديد</div></div>
             </div>
             """, unsafe_allow_html=True)
+            exs = cfg.get("cmp_ex_stats", {})
+            if exs:
+                st.caption(
+                    f"فلترة المنافسين قبل المقارنة: دخل {exs.get('input_rows', 0)} → خرج {exs.get('output_rows', 0)} | "
+                    f"عينات: {exs.get('dropped_samples', 0)}، مكياج: {exs.get('dropped_makeup', 0)}، "
+                    f"كماليات: {exs.get('dropped_accessories', 0)}، بدون حجم: {exs.get('dropped_missing_sizes', 0)}"
+                )
 
             if not suspect.empty:
                 st.markdown("""<div class="sec-title"><div class="bar"></div>
