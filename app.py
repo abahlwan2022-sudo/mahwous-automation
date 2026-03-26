@@ -2593,6 +2593,224 @@ def _build_html_description(name: str, tester: bool, brand: dict,
     return "\n".join(h)
 
 
+def _infer_gender_from_text(text: str) -> str:
+    t = str(text or "").lower()
+    if any(w in t for w in ["نسائ", "نساء", "women", "femme"]):
+        return "للنساء"
+    if any(w in t for w in ["رجال", "للرجال", "men", "homme"]):
+        return "للرجال"
+    return "للجنسين"
+
+
+def _build_html_description_from_product_ai_parts(
+    *,
+    formatted_name: str,
+    product_type: str,
+    clean_name: str,
+    brand_name: str,
+    brand_page_url: str,
+    concentration: str,
+    size: str,
+    top_notes: str,
+    heart_notes: str,
+    base_notes: str,
+    gender: str,
+) -> str:
+    """
+    HTML وفق قالب MAHWOUS الحالي (مع اختلاف "نوع المنتج" ودمج Notes القادمة من Claude).
+    """
+    brand_link = (
+        f"<a href='{mahwous_brand_url(brand_page_url)}' target='_blank' rel='noopener'>{brand_name}</a>"
+        if brand_page_url
+        else brand_name
+    )
+    tester_flag = product_type == "تستر"
+    product_type_item = (
+        "تستر (Tester)"
+        if product_type == "تستر"
+        else "عطر أصلي"
+        if product_type == "عطر"
+        else product_type
+    )
+
+    family = "غير متوفر"
+    season = "جميع الفصول"
+    gender_txt = ("للنساء" if "نساء" in gender else "للرجال" if "رجال" in gender else "للجنسين")
+    h = []
+    h.append(f"<h2>{formatted_name} {gender_txt}</h2>")
+    h.append(
+        f"<p>اكتشف سحر <strong>{clean_name}</strong> من <strong>{brand_link}</strong> — "
+        f"صمّم خصيصاً {gender_txt} ليرسم بصمتك العطري بثقة وأناقة. "
+        f"متوفّر بحجم {size} بتركيز <strong>{concentration}</strong> لضمان ثبات استثنائي.</p>"
+    )
+
+    h.append("<h3>تفاصيل المنتج</h3>")
+    h.append("<ul>")
+    h.append(f"<li><strong>الماركة:</strong> {brand_link}</li>")
+    h.append(f"<li><strong>الاسم:</strong> {clean_name}</li>")
+    h.append(f"<li><strong>الجنس:</strong> {gender_txt}</li>")
+    # لا نضيف العائلة إذا لم تتوفر
+    h.append(f"<li><strong>الحجم:</strong> {size}</li>")
+    h.append(f"<li><strong>التركيز:</strong> {concentration}</li>")
+    h.append(f"<li><strong>نوع المنتج:</strong> {product_type_item}</li>")
+    h.append("</ul>")
+
+    h.append("<h3>رحلة العطر — الهرم العطري</h3>")
+    h.append(f"<p>يأخذك <strong>{clean_name}</strong> في رحلة عطرية متكاملة تبدأ بطزالة وتنتهي بدفء وعمق.</p>")
+    h.append("<ul>")
+    h.append(f"<li><strong>المقدمة (Top Notes):</strong> {top_notes}</li>")
+    h.append(f"<li><strong>القلب (Heart Notes):</strong> {heart_notes}</li>")
+    h.append(f"<li><strong>القاعدة (Base Notes):</strong> {base_notes}</li>")
+    h.append("</ul>")
+
+    h.append("<h3>لماذا تختار هذا العطر؟</h3>")
+    h.append("<ul>")
+    h.append(f"<li><strong>الثبات والفوحان:</strong> تركيز {concentration} يضمن فوحاناً يدوم طويلاً يلفت الأنظار.</li>")
+    h.append(f"<li><strong>التميز والأصالة:</strong> من دار {brand_name} العريقة بتراث عطري أصيل.</li>")
+    h.append("<li><strong>القيمة الاستثنائية:</strong> عطر فاخر بسعر مناسب من متجر مهووس الموثوق.</li>")
+    h.append("<li><strong>الجاذبية المضمونة:</strong> عطر يجعلك محور الاهتمام في كل مكان تحضره.</li>")
+    h.append("</ul>")
+
+    h.append("<h3>متى وأين ترتديه؟</h3>")
+    h.append(
+        f"<p>مثالي لـ {season}. يلائم المناسبات الرسمية والسهرات واللقاءات العملية. "
+        f"ينصح برشه على نقاط النبض والرسغاوات لأفضل ثبات.</p>"
+    )
+
+    h.append("<h3>لمسة خبير من مهووس</h3>")
+    h.append("<p>الفوحان: 8/10 | الثبات: 9/10 | نصيحة: ابدأ بكمية صغيرة وابنِ تدريجياً حتى تجد كميتك المثالية.</p>")
+
+    h.append("<h3>الأسئلة الشائعة</h3>")
+    h.append("<ul>")
+    h.append("<li><strong>كم يدوم العطر؟</strong> بين 8-12 ساعة حسب البشرة ودرجة الحرارة.</li>")
+    h.append("<li><strong>هل يناسب الاستخدام اليومي؟</strong> نعم، بكمية معتدلة للبيئات المختلفة.</li>")
+    if tester_flag:
+        h.append("<li><strong>ما الفرق بين التستر والعطر العادي؟</strong> التستر نفس العطر تماماً بدون علبة خارجية، بسعر أقل.</li>")
+    h.append(f"<li><strong>هل يناسب الطقس الحار في السعودية؟</strong> {season} هي الموسم المثالي له.</li>")
+    h.append("<li><strong>ما مناسبات ارتداء هذا العطر؟</strong> المناسبات الرسمية، السهرات، واللقاءات العملية.</li>")
+    h.append("</ul>")
+
+    h.append("<h3>اكتشف أكثر من مهووس</h3>")
+    if brand_page_url:
+        h.append(
+            f"<p>اكتشف <a href='{mahwous_brand_url(brand_page_url)}' target='_blank' rel='noopener'>عطور {brand_name}</a> | "
+            f"<a href='{mahwous_category_url('categories/mens-perfumes')}' target='_blank' rel='noopener'>عطور رجالية</a> | "
+            f"<a href='{mahwous_category_url('categories/womens-perfumes')}' target='_blank' rel='noopener'>عطور نسائية</a></p>"
+        )
+    h.append("<p><strong>عالمك العطري يبدأ من مهووس.</strong> أصلي 100% | شحن سريع داخل السعودية.</p>")
+    return "\n".join(h)
+
+
+def _ai_enrich_product_row(raw_competitor_product_name: str, api_key: str) -> dict:
+    """
+    إثراء منتج عبر Claude:
+    - يستخرج نوع/اسم نظيف/ماركة/تركيز/حجم + Notes (Top/Heart/Base)
+    - يُبنى اسم جاهز للتصدير بصيغة: {type} {clean_name} {brand} {concentration} {size}
+    - يولّد HTML مطابق لقالب MAHWOUS مع Notes.
+    """
+    empty = {"formatted_name": "", "html_description": "", "brand": ""}
+    if not raw_competitor_product_name or not api_key or not HAS_ANTHROPIC:
+        return empty
+    cache = getattr(st.session_state, "_ai_product_enrich_cache", None)
+    if cache is None:
+        cache = {}
+        st.session_state._ai_product_enrich_cache = cache
+    cache_key = str(raw_competitor_product_name).strip().lower()
+    if cache_key in cache:
+        return cache[cache_key]
+
+    try:
+        client = anthropic.Anthropic(api_key=api_key)
+        allowed_types = ["عطر", "تستر", "طقم", "مزيل عرق", "معطر شعر", "معطر جسم"]
+        prompt = (
+            "أنت خبير إدخال بيانات + خبير عطور (Master Perfumer).\n"
+            "استخرج من اسم منتج المنافس حقولاً دقيقة جداً.\n\n"
+            f"الاسم الخام: {raw_competitor_product_name}\n\n"
+            "أعد JSON فقط (بدون أي نص خارج JSON) بمفاتيح عربية حرفياً:\n"
+            "{"
+            "\"type\":\"(يجب أن يكون من القائمة تماماً)\","
+            "\"clean_name\":\"\","
+            "\"brand\":\"(Arabic | English)\","
+            "\"concentration\":\"\","
+            "\"size\":\"(مثل 100 مل)\","
+            "\"top_notes\":\"\","
+            "\"heart_notes\":\"\","
+            "\"base_notes\":\"\""
+            "}\n\n"
+            "القواعد الصارمة:\n"
+            f"1) type يجب أن يكون واحداً فقط من: {allowed_types}\n"
+            "2) clean_name: اسم الرائحة الأساسي فقط بدون brand وبدون size وبدون نوع المنتج، وبلا كلمات قمامة مثل (بدون غطاء، إصدار قديم...) حتى لو كانت موجودة.\n"
+            "3) brand: الاسم الرسمي للماركة فقط بصيغة \"Arabic_Name | English_Name\" إن أمكن. إن لم تكن الماركة واضحة: أعد \"\".\n"
+            "4) concentration: اختر صيغة عربية صحيحة مثل \"أو دو بارفيوم\" أو \"أو دو تواليت\" أو \"بارفيوم\".\n"
+            "5) size: أعد الحجم كما في الاسم بصيغة عربية مثل \"100 مل\". إن لم يوجد: أعد \"\".\n"
+            "6) top_notes/heart_notes/base_notes: مكونات حقيقية للرائحة (كتابة عربية مفهومة مفصولة بفواصل).\n"
+        )
+        msg = client.messages.create(
+            model="claude-3-haiku-20240307",
+            max_tokens=600,
+            temperature=0.1,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        raw = msg.content[0].text.strip()
+        m = re.search(r"\{[\s\S]*\}", raw)
+        if not m:
+            return empty
+        data = json.loads(m.group())
+
+        ai_type = str(data.get("type", "") or "").strip()
+        if ai_type not in ["عطر", "تستر", "طقم", "مزيل عرق", "معطر شعر", "معطر جسم"]:
+            ai_type = "عطر"
+
+        clean_name = str(data.get("clean_name", "") or "").strip()
+        brand_raw = str(data.get("brand", "") or "").strip()
+        conc = str(data.get("concentration", "") or "").strip()
+        size = str(data.get("size", "") or "").strip()
+        top = str(data.get("top_notes", "") or "").strip()
+        heart = str(data.get("heart_notes", "") or "").strip()
+        base = str(data.get("base_notes", "") or "").strip()
+
+        if not clean_name or not brand_raw or not conc or not size:
+            return empty
+
+        # تنظيف brand خوفاً من تسرب كلمات توقّف داخل الماركة
+        brand_clean = _clean_brand_value_for_salla_output(brand_raw)
+        if not brand_clean:
+            return empty
+
+        formatted_name = f"{ai_type} {clean_name} {brand_clean} {conc} {size}".strip()
+
+        # قدر الإمكان نحاول إيجاد slug للربط داخل MAHWOUS
+        bmatch = match_brand(brand_clean) if st.session_state.get("brands_df", None) is not None else {"name": brand_clean, "page_url": ""}
+        brand_page_url = str(bmatch.get("page_url", "") or "").strip()
+        if not brand_page_url:
+            # fallback slug من الجزء الإنجليزي
+            parts = [p.strip() for p in str(brand_clean).split("|", 1)]
+            en_part = parts[1] if len(parts) == 2 else parts[0]
+            brand_page_url = to_slug(en_part)
+
+        gender_txt = _infer_gender_from_text(raw_competitor_product_name)
+
+        html = _build_html_description_from_product_ai_parts(
+            formatted_name=formatted_name,
+            product_type=ai_type,
+            clean_name=clean_name,
+            brand_name=brand_clean,
+            brand_page_url=brand_page_url,
+            concentration=conc,
+            size=size,
+            top_notes=top if top else "غير متوفر",
+            heart_notes=heart if heart else "غير متوفر",
+            base_notes=base if base else "غير متوفر",
+            gender=gender_txt,
+        )
+
+        out = {"formatted_name": formatted_name, "html_description": html, "brand": brand_clean}
+        cache[cache_key] = out
+        return out
+    except Exception:
+        return empty
+
+
 def ai_generate(name: str, tester: bool, brand: dict,
                 size: str, gender: str, conc: str) -> str:
     """توليد الوصف: AI يجلب المكونات فقط (300 token) والكود يولد HTML الكامل (مجاني)."""
@@ -4810,15 +5028,27 @@ if st.session_state.page == "pipeline":
             st.markdown("""<div class="sec-title"><div class="bar"></div>
             <h3>جدول المنتجات المعتمدة — تعديل مباشر</h3></div>""", unsafe_allow_html=True)
             pdf = approved_df.copy()
+            # عمود مؤقت لتحديد الصفوف التي سيتم إثراؤها بالذكاء الاصطناعي
+            if "_تحديد_للإثراء" not in pdf.columns:
+                pdf["_تحديد_للإثراء"] = False
             all_pc = list(pdf.columns)
             show_default_p = [c for c in EDITOR_COLS if c in all_pc]
+            if "_تحديد_للإثراء" in pdf.columns and "_تحديد_للإثراء" not in show_default_p:
+                show_default_p = ["_تحديد_للإثراء"] + show_default_p
             show_cols_p = st.multiselect(
                 "الأعمدة المعروضة:", options=all_pc, default=show_default_p or all_pc[:10],
                 key="pipe_show_cols")
             if not show_cols_p:
                 show_cols_p = show_default_p or all_pc[:10]
+            if "_تحديد_للإثراء" not in show_cols_p and "_تحديد_للإثراء" in pdf.columns:
+                show_cols_p = ["_تحديد_للإثراء"] + list(show_cols_p)
+
+            grid_df = pdf[show_cols_p].copy()
+            for c in show_cols_p:
+                if c != "_تحديد_للإثراء":
+                    grid_df[c] = grid_df[c].fillna("")
             edited_pipe = st.data_editor(
-                pdf[show_cols_p].fillna(""),
+                grid_df,
                 use_container_width=True,
                 num_rows="dynamic",
                 height=440,
@@ -4826,7 +5056,52 @@ if st.session_state.page == "pipeline":
             )
             for c in show_cols_p:
                 pdf[c] = edited_pipe[c]
+            if "_تحديد_للإثراء" in pdf.columns:
+                pdf["_تحديد_للإثراء"] = pdf["_تحديد_للإثراء"].fillna(False).astype(bool)
             st.session_state.pipe_approved = pdf
+
+            # ── بدء إثراء AI للمنتجات المحددة ────────────────────────────
+            selected_idx = []
+            if "_تحديد_للإثراء" in pdf.columns:
+                try:
+                    selected_idx = pdf.index[pdf["_تحديد_للإثراء"] == True].tolist()
+                except Exception:
+                    selected_idx = []
+
+            if selected_idx:
+                st.caption(f"تم تحديد {len(selected_idx)} منتج/منتجات لإثراء AI.")
+            else:
+                st.caption("اختر صفوفاً عبر `_تحديد_للإثراء` ثم اضغط زر الإثراء.")
+
+            if st.button(
+                "✨ بدء الإثراء بالذكاء الاصطناعي للمنتجات المحددة",
+                key="pipe_start_product_ai_enrich",
+                type="primary",
+                use_container_width=True,
+            ):
+                if not st.session_state.api_key:
+                    st.error("أضف مفتاح Anthropic API من صفحة الإعدادات أولاً.")
+                    st.stop()
+                if not selected_idx:
+                    st.warning("لا توجد صفوف محددة لإثراء AI.")
+                    st.stop()
+
+                prog = st.progress(0)
+                total = len(selected_idx)
+                for n, ix in enumerate(selected_idx):
+                    raw_nm = str(pdf.at[ix, "أسم المنتج"]) if "أسم المنتج" in pdf.columns else ""
+                    with st.spinner(f"جاري إثراء المنتج ({n+1}/{total}): {raw_nm[:55]}..."):
+                        ai_out = _ai_enrich_product_row(raw_nm, st.session_state.api_key)
+                    if ai_out.get("formatted_name") and ai_out.get("html_description"):
+                        pdf.at[ix, "أسم المنتج"] = ai_out.get("formatted_name", raw_nm)
+                        pdf.at[ix, "الوصف"] = ai_out.get("html_description", pdf.at[ix, "الوصف"])
+                        if "الماركة" in pdf.columns and ai_out.get("brand"):
+                            pdf.at[ix, "الماركة"] = _clean_brand_value_for_salla_output(ai_out.get("brand", ""))
+                    prog.progress(int((n + 1) / max(total, 1) * 100))
+
+                st.session_state.pipe_approved = pdf
+                st.success("✅ اكتمل إثراء AI للمنتجات المحددة.")
+                st.rerun()
 
         st.markdown("""<hr class="gdiv"><div class="sec-title"><div class="bar"></div>
         <h3>⬇️ التصدير النهائي</h3></div>""", unsafe_allow_html=True)
