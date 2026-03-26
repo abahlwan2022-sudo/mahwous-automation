@@ -1893,6 +1893,49 @@ def ai_filter_suspects(suspects_df: pd.DataFrame, store_names: list,
         return pd.DataFrame(), suspects_df
 
 
+def _resolve_suspicious_with_ai(
+    competitor_name: str,
+    closest_store_match_name: str,
+) -> str:
+    """
+    تحقق عميق من المنتجات المشتبه بها عبر Claude.
+    - إذا كانت A و B نفس المنتج تماماً => 'YES'
+    - غير ذلك => 'NO'
+    في حال أي خطأ/تعذر: تُرجع "" (ويتم التعامل معها كـ 'NO' افتراضياً لحفظ البيانات).
+    """
+    api_key = st.session_state.api_key if hasattr(st, "session_state") else ""
+    if not api_key or not HAS_ANTHROPIC:
+        return ""
+    try:
+        client = anthropic.Anthropic(api_key=api_key)
+        prompt = (
+            "You are an expert perfume evaluator. "
+            "Compare these two product names:\n"
+            f"Product A (Competitor): '{competitor_name}'\n"
+            f"Product B (My Store): '{closest_store_match_name}'\n\n"
+            "Are these the exact same product? "
+            "Pay strict attention to concentrations (EDT, EDP, Parfum, Cologne), "
+            "terms like 'Tester' or 'تستر', and sizes (ml).\n"
+            "If they are the exact same product, reply strictly with the word 'YES'. "
+            "If they are different in concentration, type, or size, reply strictly with the word 'NO'. "
+            "Do not explain."
+        )
+        msg = client.messages.create(
+            model="claude-haiku-4-5",
+            max_tokens=10,
+            temperature=0.0,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        raw = str(msg.content[0].text).strip().upper()
+        if raw.startswith("YES"):
+            return "YES"
+        if raw.startswith("NO"):
+            return "NO"
+        return ""
+    except Exception:
+        return ""
+
+
 
 
 def _strip_brand_name_edges(raw: object) -> str:
@@ -3448,18 +3491,37 @@ def _normalize_simple_brand_token(s: str) -> str:
     return re.sub(r"\s+", " ", str(s or "").strip())
 
 
-def _extract_brand_from_name_first_words(name: str) -> str:
-    """استنتاج ماركة مرجحة من أول 2-3 كلمات في الاسم."""
+_BRAND_STOP_WORDS = [
+    "عطر", "تستر", "تيستر", "طقم", "مجموعة", "او دو بارفيوم", "او دو تواليت",
+    "أو دو بارفيوم", "أو دو تواليت",
+    "مل", "بديل", "تعبئة", "عينة", "tester", "parfum", "edt", "edp",
+    "eau", "de", "parfum", "toilette", "ml", "oz",
+]
+
+
+def _clean_product_name_for_brand_search(name: str) -> str:
+    """تنظيف اسم المنتج من كلمات/أنماط غير مفيدة قبل استخراج/مطابقة الماركة."""
     if not name:
         return ""
-    n = str(name).strip()
-    n = re.sub(r"^(?:عطر|تستر|تيستر|perfume|tester)\s+", "", n, flags=re.IGNORECASE).strip()
+    txt = str(name).lower()
+    txt = strip_trailing_discount_label(txt)
+    txt = re.sub(r"\d+(?:[.,]\d+)?\s*(?:مل|ml|oz|غرام|جرام)\b", " ", txt, flags=re.IGNORECASE)
+    for sw in _BRAND_STOP_WORDS:
+        txt = re.sub(rf"\b{re.escape(sw.lower())}\b", " ", txt, flags=re.IGNORECASE)
+    txt = re.sub(r"[^\w\u0600-\u06FF\s]", " ", txt)
+    txt = re.sub(r"\s+", " ", txt).strip()
+    return txt
+
+
+def _extract_brand_from_name_first_words(name: str) -> str:
+    """Fallback فقط: استنتاج ماركة من أول 1-2 كلمة بعد التنظيف."""
+    if not name:
+        return ""
+    n = _clean_product_name_for_brand_search(name)
     words = [w for w in n.split() if w and w not in ("-", "—", "–")]
     if not words:
         return ""
     cands = []
-    if len(words) >= 3:
-        cands.append(" ".join(words[:3]))
     if len(words) >= 2:
         cands.append(" ".join(words[:2]))
     cands.append(words[0])
@@ -3491,21 +3553,32 @@ def _fuzzy_ratio_local(a: str, b: str) -> float:
 
 def _collect_known_brand_names(pipe_store_df: pd.DataFrame, brands_df: pd.DataFrame) -> list:
     names = []
+    def _push_variants(raw: str):
+        raw = str(raw or "").strip()
+        if not raw:
+            return
+        # split bilingual / aliased strings: "جيفنشي | Givenchy", "A / B"
+        parts = [p.strip() for p in re.split(r"\s*[|/]\s*", raw) if p.strip()]
+        if not parts:
+            parts = [raw]
+        for p in parts:
+            p = _normalize_simple_brand_token(p)
+            if p:
+                names.append(p)
+
     if brands_df is not None and not brands_df.empty:
         bcol = brands_df.columns[0]
         for v in brands_df[bcol].dropna().astype(str):
-            raw = v.strip()
-            if not raw:
-                continue
-            parts = [p.strip() for p in re.split(r"\s*\|\s*", raw) if p.strip()]
-            names.extend(parts if parts else [raw])
-    if pipe_store_df is not None and not pipe_store_df.empty and "الماركة" in pipe_store_df.columns:
-        for v in pipe_store_df["الماركة"].dropna().astype(str):
-            raw = v.strip()
-            if not raw:
-                continue
-            parts = [p.strip() for p in re.split(r"\s*\|\s*", raw) if p.strip()]
-            names.extend(parts if parts else [raw])
+            _push_variants(v)
+    if pipe_store_df is not None and not pipe_store_df.empty:
+        # detect brand column even if app guessed a different header name
+        store_brand_col = (
+            "الماركة" if "الماركة" in pipe_store_df.columns else
+            auto_guess_col(pipe_store_df.columns, ["الماركة", "ماركة", "brand", "علامة"], pipe_store_df)
+        )
+        if store_brand_col and store_brand_col != "— لا يوجد —" and store_brand_col in pipe_store_df.columns:
+            for v in pipe_store_df[store_brand_col].dropna().astype(str):
+                _push_variants(v)
     out = []
     seen = set()
     for n in names:
@@ -3521,14 +3594,37 @@ def _build_missing_brands_df_from_competitors(
     comp_df: pd.DataFrame,
     name_col: str,
     known_brands: list,
-    threshold: float = 80.0,
+    threshold: float = 85.0,
 ) -> pd.DataFrame:
     if comp_df is None or comp_df.empty or name_col not in comp_df.columns:
         return pd.DataFrame(columns=SALLA_BRANDS_COLS)
     rows = []
     seen = set()
+    # sort by length so multi-word brands match first
+    known_sorted = sorted(
+        [k for k in known_brands if str(k).strip()],
+        key=lambda x: len(str(x)),
+        reverse=True,
+    )
     for nm in comp_df[name_col].fillna("").astype(str):
-        cand = _extract_brand_from_name_first_words(nm)
+        cleaned = _clean_product_name_for_brand_search(nm)
+        if not cleaned:
+            continue
+
+        # Reverse dictionary search: if known brand exists anywhere, skip
+        matched_known = ""
+        for kb in known_sorted:
+            kb_n = _normalize_simple_brand_token(str(kb)).lower()
+            if not kb_n or len(kb_n) < 2:
+                continue
+            if re.search(rf"(?<!\w){re.escape(kb_n)}(?!\w)", cleaned, flags=re.IGNORECASE):
+                matched_known = kb
+                break
+        if matched_known:
+            continue
+
+        # Fallback guess only when no known brand is found
+        cand = _extract_brand_from_name_first_words(cleaned)
         if not cand:
             continue
         best_score = 0.0
@@ -4251,9 +4347,36 @@ if st.session_state.page == "pipeline":
             store_names_p = [str(r.get(store_nm, "")) for _, r in store_df_p.iterrows()]
 
             if aok_pipe and not suspects_p.empty:
-                ai_approved, ai_rejected = ai_filter_suspects(
-                    suspects_p, store_names_p,
-                    st.session_state.api_key, store_df_p)
+                # تحقق عميق صف-بصف عبر Claude (YES => مكرر، NO => جديد)
+                verified_approved_rows = []
+                verified_rejected_rows = []
+                cache = {}  # (competitor, store) -> YES/NO
+                prog_ai = st.progress(0, text="🔍 جاري التحقق العميق بالذكاء الاصطناعي للمنتجات المشتبه بها...")
+                for j, (orig_idx, srow) in enumerate(suspects_p.iterrows()):
+                    if j % 1 == 0:
+                        prog_ai.progress(int((j + 1) / max(len(suspects_p), 1) * 100))
+                    comp_nm = str(srow.get("الاسم الجديد", "") or "").strip()
+                    closest_nm = str(srow.get("أقرب تطابق في المتجر", "") or "").strip()
+                    if not comp_nm or not closest_nm:
+                        # بدون اسم متجر كافٍ: افتراض NO لحفظ البيانات
+                        verified_approved_rows.append(srow)
+                        continue
+                    key = (comp_nm, closest_nm)
+                    if key in cache:
+                        verdict = cache[key]
+                    else:
+                        verdict = _resolve_suspicious_with_ai(comp_nm, closest_nm)
+                        cache[key] = verdict
+
+                    # Golden rule: عند أي خطأ/غموض (""), افترض أنه جديد (NO) لحفظ البيانات
+                    if verdict == "YES":
+                        verified_rejected_rows.append(srow)
+                    else:
+                        verified_approved_rows.append(srow)
+
+                prog_ai.progress(100, text="✅ اكتمل التحقق العميق")
+                ai_approved = pd.DataFrame(verified_approved_rows) if verified_approved_rows else pd.DataFrame()
+                ai_rejected = pd.DataFrame(verified_rejected_rows) if verified_rejected_rows else pd.DataFrame()
             else:
                 # بدون AI: استبعد الكل
                 ai_approved = pd.DataFrame()
