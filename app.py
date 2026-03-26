@@ -35,6 +35,7 @@ from mahwous_core import (
     validate_export_seo_dataframe,
     validate_export_brands_list,
     parse_price_numeric,
+    format_salla_date_yyyy_mm_dd,
 )
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
@@ -336,6 +337,17 @@ def _get_secret(*keys: str) -> str:
     return ""
 
 
+def _effective_anthropic_api_key() -> str:
+    """مفتاح Claude من الجلسة أو secrets/البيئة (للمسار الآلي والتحقق من المشبوه)."""
+    try:
+        k = str(st.session_state.get("api_key", "") or "").strip()
+    except Exception:
+        k = ""
+    if k:
+        return k
+    return _get_secret("ANTHROPIC_API_KEY")
+
+
 # ╔══════════════════════════════════════════════════════════════════╗
 # ║  LOGGING — تتبع الأخطاء والعمليات                                ║
 # ╚══════════════════════════════════════════════════════════════════╝
@@ -366,6 +378,33 @@ def configure_app_logging() -> logging.Logger:
 
 
 APP_LOG = configure_app_logging()
+
+
+def anthropic_messages_create(client, **kwargs):
+    """استدعاء Anthropic Messages API مع إعادة محاولة عند 429 / تجاوز المعدل."""
+    last_err = None
+    for attempt in range(3):
+        try:
+            return client.messages.create(**kwargs)
+        except Exception as e:
+            last_err = e
+            err_l = str(e).lower()
+            name = type(e).__name__
+            retryable = (
+                "429" in err_l
+                or "rate limit" in err_l
+                or "too many requests" in err_l
+                or "rate_limit" in name.lower()
+                or "overloaded" in err_l
+            )
+            if retryable and attempt < 2:
+                time.sleep(2)
+                APP_LOG.warning("anthropic retry %s/3 after %s: %s", attempt + 1, name, e)
+                continue
+            raise
+    if last_err:
+        raise last_err
+    raise RuntimeError("anthropic_messages_create: unreachable")
 
 
 def _parse_json_object_from_llm_text(raw: str, *, context: str = "") -> dict:
@@ -1988,7 +2027,8 @@ def ai_filter_suspects(suspects_df: pd.DataFrame, store_names: list,
 أرجع JSON النقي فقط بدون أي نصوص خارجه:
 {{"decisions": [{{"idx": 0, "decision": "جديد", "reason": "..."}} , ...]}}"""
 
-        msg = client.messages.create(
+        msg = anthropic_messages_create(
+            client,
             model="claude-haiku-4-5",
             max_tokens=2000,
             messages=[{"role": "user", "content": prompt}]
@@ -2028,7 +2068,7 @@ def _resolve_suspicious_with_ai(
     - غير ذلك => 'NO'
     في حال أي خطأ/تعذر: تُرجع "" (ويتم التعامل معها كـ 'NO' افتراضياً لحفظ البيانات).
     """
-    api_key = st.session_state.api_key if hasattr(st, "session_state") else ""
+    api_key = _effective_anthropic_api_key()
     if not api_key or not HAS_ANTHROPIC:
         return ""
     try:
@@ -2045,7 +2085,8 @@ def _resolve_suspicious_with_ai(
             "If they are different in concentration, type, or size, reply strictly with the word 'NO'. "
             "Do not explain."
         )
-        msg = client.messages.create(
+        msg = anthropic_messages_create(
+            client,
             model="claude-haiku-4-5",
             max_tokens=10,
             temperature=0.0,
@@ -2184,7 +2225,8 @@ def generate_new_brand(brand_name: str) -> dict:
                 '"en_name": "English name only", '
                 '"desc": "وصف جذاب 30 كلمة لمتجر مهووس"}'
             )
-            msg = client.messages.create(
+            msg = anthropic_messages_create(
+                client,
                 model="claude-3-haiku-20240307", max_tokens=250,
                 messages=[{"role": "user", "content": prompt}]
             )
@@ -2245,6 +2287,23 @@ def to_slug(text: str) -> str:
             out += "-"
     return re.sub(r"-+", "-", out).strip("-") or "perfume"
 
+
+def _append_sku_to_seo_slug(url: str, sku_suffix: str) -> str:
+    """يُلحق لاحقة SKU بمسار SEO لتفادي التصادمات."""
+    u = str(url or "").strip()
+    if not sku_suffix:
+        return u
+    suf_raw = str(sku_suffix).strip()
+    suf = to_slug(suf_raw)
+    if not suf:
+        suf = re.sub(r"[^a-z0-9-]+", "-", suf_raw.lower()).strip("-")
+    if not suf:
+        return u
+    if u.endswith(suf) or u.endswith("-" + suf):
+        return u
+    return f"{u}-{suf}".strip("-") if u else suf
+
+
 # تحديث وتوحيد مفاتيح الماركات الجديدة لتطابق صيغة ملف مهووس
 for b in st.session_state.new_brands:
     if "اسم الماركة" not in b:
@@ -2258,18 +2317,29 @@ for b in st.session_state.new_brands:
         b["(Page Description) وصف صفحة العلامة التجارية"] = f"تسوّق أحدث عطور {bn} الأصلية. تشكيلة فاخرة تناسب ذوقك بأسعار حصرية من متجر مهووس."
 
 
-def gen_seo(name: str, brand: dict, size: str,
-            tester: bool, gender: str) -> dict:
+def gen_seo(
+    name: str,
+    brand: dict,
+    size: str,
+    tester: bool,
+    gender: str,
+    sku_suffix: str = "",
+    type_hint: str = "",
+) -> dict:
     bname = brand.get("name", "")
     parts = re.split(r"\s*\|\s*", bname)
     ben   = parts[-1].strip() if len(parts) > 1 else bname
     pref  = "تستر" if tester else "عطر"
     title = f"{pref} {name} {size} | {ben}".strip()
+    hint = f"{type_hint} {name} {bname}"
+    if ("تستر" in hint or "tester" in hint.lower()) and "تستر" not in title:
+        title = f"تستر {title}".strip()
     desc  = (f"تسوق {pref} {name} {size} الأصلي من {bname}. "
              f"عطر {gender} فاخر ثابت. أصلي 100% من مهووس.")
     if len(desc) > 160:
         desc = desc[:157] + "..."
     slug = to_slug(f"{ben}-{name}-{size}".replace("مل", "ml"))
+    slug = _append_sku_to_seo_slug(slug, sku_suffix)
     return {
         "url":   slug,
         "title": title,
@@ -2290,11 +2360,15 @@ def _col_contains_any(df: pd.DataFrame, keywords: tuple) -> str:
 def ai_refine_seo_fields(
     name: str, brand: dict, size: str, tester: bool, gender: str,
     product_desc: str, base: dict,
+    sku_suffix: str = "",
 ) -> dict:
     """يحسّن عنوان ووصف ومسار SEO باستخدام Claude — نفس منطق المعالج المستقل."""
-    key = st.session_state.api_key
+    key = _effective_anthropic_api_key()
     if not key or not HAS_ANTHROPIC:
-        return base
+        out = dict(base)
+        if sku_suffix:
+            out["url"] = _append_sku_to_seo_slug(out.get("url", ""), sku_suffix)
+        return out
     try:
         client = anthropic.Anthropic(api_key=key)
         _site_hint = MAHWOUS_SITE_BASE.replace("https://", "").replace("http://", "")
@@ -2311,7 +2385,8 @@ def ai_refine_seo_fields(
             "قواعد: meta_description حتى 160 حرفًا عربية فاخرة، page_title حتى 65 حرفًا، "
             "url_slug لاتيني صغير بشرطات فقط بدون مسافات."
         )
-        msg = client.messages.create(
+        msg = anthropic_messages_create(
+            client,
             model="claude-3-haiku-20240307",
             max_tokens=600,
             messages=[{"role": "user", "content": prompt}],
@@ -2320,14 +2395,20 @@ def ai_refine_seo_fields(
         d = _parse_json_object_from_llm_text(raw, context="ai_refine_seo_fields")
         if d:
             return {
-                "url": str(d.get("url_slug", base["url"])).strip() or base["url"],
+                "url": _append_sku_to_seo_slug(
+                    str(d.get("url_slug", base["url"])).strip() or base["url"],
+                    sku_suffix,
+                ),
                 "title": str(d.get("page_title", base["title"])).strip() or base["title"],
                 "desc": str(d.get("meta_description", base["desc"])).strip() or base["desc"],
                 "alt": base.get("alt", ""),
             }
     except Exception:
         pass
-    return base
+    out = dict(base)
+    if sku_suffix:
+        out["url"] = _append_sku_to_seo_slug(out.get("url", ""), sku_suffix)
+    return out
 
 
 def build_salla_seo_row(
@@ -2350,8 +2431,17 @@ def build_salla_seo_row(
         gender = "للرجال"
     elif any(w in nl for w in ["نساء", "للنساء", "women", "femme"]):
         gender = "للنساء"
-    base = gen_seo(name, brand, size, is_t, gender)
-    refined = ai_refine_seo_fields(name, brand, size, is_t, gender, product_desc, base)
+    sku_suf = f"V-{no}"
+    th = str(attrs.get("type", "") or "")
+    base = gen_seo(
+        name, brand, size, is_t, gender,
+        sku_suffix=sku_suf,
+        type_hint=th,
+    )
+    refined = ai_refine_seo_fields(
+        name, brand, size, is_t, gender, product_desc, base,
+        sku_suffix=sku_suf,
+    )
     return {
         "No. (غير قابل للتعديل)": str(no),
         "اسم المنتج (غير قابل للتعديل)": name,
@@ -2596,7 +2686,8 @@ def extract_product_json_from_url(url: str, api_key: str) -> dict:
             "مثال شكل JSON:\n"
             "{\"أسم المنتج\":\"\",\"الماركة\":\"\",\"سعر المنتج\":\"\",\"الوصف\":\"<p>...</p>\",\"صورة المنتج\":\"\"}"
         )
-        msg = client.messages.create(
+        msg = anthropic_messages_create(
+            client,
             model="claude-3-haiku-20240307",
             max_tokens=600,
             temperature=0.1,
@@ -2626,7 +2717,8 @@ def _ai_fetch_notes_only(name: str, brand_name: str, api_key: str) -> dict:
             '{"top": "مكونات القمة", "heart": "مكونات القلب", '
             '"base": "مكونات القاعدة", "family": "العائلة العطرية", "year": "سنة الإصدار"}'
         )
-        msg = client.messages.create(
+        msg = anthropic_messages_create(
+            client,
             model="claude-3-haiku-20240307",
             max_tokens=300,
             temperature=0.1,
@@ -2750,6 +2842,56 @@ def _strip_junk_phrases_from_clean_name(s: str) -> str:
         t = re.sub(re.escape(j), " ", t, flags=re.IGNORECASE)
     t = re.sub(r"\s+", " ", t).strip()
     return t
+
+
+def _strip_brand_tokens_from_clean_name(clean_name: str, brand_clean: str) -> str:
+    """يزيل تكرار أجزاء الماركة العربية/الإنجليزية من اسم الرائحة (تدقيق #29)."""
+    cn = str(clean_name or "").strip()
+    if not cn or not str(brand_clean or "").strip():
+        return cn
+    b = str(brand_clean).strip()
+    parts = [p.strip() for p in re.split(r"\s*\|\s*", b) if p.strip()]
+    if not parts:
+        parts = [b]
+    for _ in range(6):
+        prev = cn
+        for p in parts:
+            if len(p) < 2:
+                continue
+            ep = re.escape(p)
+            cn = re.sub(rf"(^|\s){ep}(\s|$)", " ", cn, flags=re.IGNORECASE)
+            cn = re.sub(r"\s+", " ", cn).strip()
+        if cn == prev:
+            break
+    return cn.strip()
+
+
+def _normalize_product_size_ml(size: str) -> str:
+    """تطبيع الحجم إلى «رقم مل»؛ قيم مثل .5 بلا وحدة تُفسَّر كـ 50 مل."""
+    s = str(size or "").strip()
+    if not s or s.lower() in ("nan", "none"):
+        return ""
+    low = s.lower()
+    if "مل" in s or re.search(r"\bml\b", low):
+        num_m = re.search(r"(\d+(?:[.,]\d+)?)", s.replace("٫", ".").replace(",", "."))
+        if num_m:
+            val = float(num_m.group(1).replace(",", "."))
+            if abs(val - round(val)) < 1e-9:
+                return f"{int(round(val))} مل"
+            t = f"{val:.4f}".rstrip("0").rstrip(".")
+            return f"{t} مل"
+        return s
+    t = s.replace("٫", ".").replace(",", ".").strip()
+    m = re.fullmatch(r"(\d+\.?\d*|\.\d+)", t)
+    if not m:
+        return s
+    val = float(m.group(1))
+    if 0 < val < 1:
+        val = val * 100.0
+    if abs(val - round(val)) < 1e-9:
+        return f"{int(round(val))} مل"
+    t2 = f"{val:.4f}".rstrip("0").rstrip(".")
+    return f"{t2} مل"
 
 
 def _strip_type_words_from_clean_name_for_display(clean_name: str, ai_type: str) -> str:
@@ -2930,7 +3072,8 @@ def _ai_enrich_product_row(raw_competitor_product_name: str, api_key: str) -> di
             "ممنوع تماماً إخراج «غير متوفر» أو ترك الحقول فارغة — املأها دائماً بمكونات معقولة.\n"
             "8) لا تُدرج أي سعر أو رمز عملة أو رقم يشبه السعر في أي حقل.\n"
         )
-        msg = client.messages.create(
+        msg = anthropic_messages_create(
+            client,
             model="claude-3-haiku-20240307",
             max_tokens=600,
             temperature=0.1,
@@ -2960,6 +3103,11 @@ def _ai_enrich_product_row(raw_competitor_product_name: str, api_key: str) -> di
 
         brand_clean = _clean_brand_value_for_salla_output(brand_raw)
         if not brand_clean:
+            return empty
+
+        clean_name = _strip_brand_tokens_from_clean_name(clean_name, brand_clean)
+        size = _normalize_product_size_ml(size)
+        if not clean_name or not size:
             return empty
 
         top, heart, base = _normalize_ai_notes_triplet(top, heart, base)
@@ -3120,6 +3268,47 @@ def _prepare_salla_product_df_for_export(df: pd.DataFrame) -> pd.DataFrame:
         df["تصنيف المنتج"] = df["أسم المنتج"].apply(
             lambda n: match_category(str(n), "")
         )
+
+    def _export_cost_row(row) -> str:
+        raw = row.get("سعر التكلفة", "")
+        s = sanitize_salla_price_for_export(raw)
+        if s:
+            return s
+        ok, price = parse_price_numeric(row.get("سعر المنتج", ""))
+        if ok and price > 0:
+            d = round(price * 0.70, 2)
+            if abs(d - int(d)) < 1e-9:
+                return str(int(d))
+            ds = f"{d:.2f}".rstrip("0").rstrip(".")
+            return ds
+        return ""
+
+    df["سعر التكلفة"] = df.apply(_export_cost_row, axis=1)
+
+    def _promo_row(row) -> str:
+        v = str(row.get("العنوان الترويجي", "") or "").strip()
+        if v and v.lower() not in ("nan", "none"):
+            return v
+        name = str(row.get("أسم المنتج", "") or "")
+        ptype = str(row.get("نوع المنتج", "") or "")
+        if "تستر" in name or "تستر" in ptype:
+            return "إصدار حصري"
+        if "طقم" in name or "مجموعة" in name:
+            return "الأكثر مبيعاً"
+        return "عطر فاخر"
+
+    df["العنوان الترويجي"] = df.apply(_promo_row, axis=1)
+
+    def _disc_date(v):
+        if v is None or (isinstance(v, float) and pd.isna(v)):
+            return ""
+        s = str(v).strip()
+        if not s or s.lower() in ("nan", "none", "nat"):
+            return ""
+        return format_salla_date_yyyy_mm_dd(v) or ""
+
+    df["تاريخ بداية التخفيض"] = df["تاريخ بداية التخفيض"].apply(_disc_date)
+    df["تاريخ نهاية التخفيض"] = df["تاريخ نهاية التخفيض"].apply(_disc_date)
     return df
 
 
@@ -3283,7 +3472,8 @@ def generate_seo_data_ai(product_name: str, missing_fields: list[str]) -> dict:
         )
 
         client = anthropic.Anthropic(api_key=api_key)
-        msg = client.messages.create(
+        msg = anthropic_messages_create(
+            client,
             model="claude-3-haiku-20240307",
             max_tokens=500,
             temperature=0.1,
@@ -4078,7 +4268,8 @@ def _extract_brand_entity_with_ai(product_name: str, api_key: str) -> str:
             "- If you cannot name the brand confidently, return exactly: Unknown\n\n"
             f"Product title:\n{pre}\n"
         )
-        msg = client.messages.create(
+        msg = anthropic_messages_create(
+            client,
             model="claude-3-haiku-20240307",
             max_tokens=120,
             temperature=0.0,
@@ -4283,7 +4474,8 @@ def _ai_enrich_brand_row_with_domain(brand_name: str, api_key: str) -> dict:
             "- domain: الدومين الرسمي للماركة فقط (مثل chanel.com) بدون http/https أو www أو مسار.\n"
             "- إذا تعذر تحديد أي حقل بدقة اعده كسلسلة فارغة فقط."
         )
-        msg = client.messages.create(
+        msg = anthropic_messages_create(
+            client,
             model="claude-3-haiku-20240307",
             max_tokens=350,
             temperature=0.1,
@@ -4647,6 +4839,7 @@ def render_store_audit_tab():
                                     size = "100 مل"
                                 else:
                                     size = f"{int(size_f) if size_f == int(size_f) else size_f} مل"
+                                size = _normalize_product_size_ml(size) or size
                                 conc   = attrs.get("concentration") or "EDP"
                                 conc_ar = {"EDP": "أو دو بارفيوم", "EDT": "أو دو تواليت",
                                            "EDC": "أو دو كولون", "PARFUM": "بارفيوم",
@@ -4680,7 +4873,12 @@ def render_store_audit_tab():
                                     f_row["الوصف"] = ai_generate(
                                         pname, is_t, brand_dict, size, gender, conc_ar)
 
-                                seo_data = gen_seo(pname, brand_dict, size, is_t, gender)
+                                no_seo = str(f_row.get("No.", "") or fix_i + 1).strip()
+                                seo_data = gen_seo(
+                                    pname, brand_dict, size, is_t, gender,
+                                    sku_suffix=f"V-{no_seo}",
+                                    type_hint=str(attrs.get("type", "") or ""),
+                                )
                                 f_row["وصف صورة المنتج"] = seo_data["alt"]
 
                                 final_dict = {col: "" for col in SALLA_COLS}
@@ -5039,7 +5237,11 @@ if st.session_state.page == "pipeline":
 
             store_names_p = [str(r.get(store_nm, "")) for _, r in store_df_p.iterrows()]
 
-            if aok_pipe and not suspects_p.empty:
+            _pipe_resolve_key = _effective_anthropic_api_key()
+            if _pipe_resolve_key and not str(st.session_state.get("api_key", "") or "").strip():
+                st.session_state.api_key = _pipe_resolve_key
+
+            if _pipe_resolve_key and HAS_ANTHROPIC and not suspects_p.empty:
                 # تحقق عميق صف-بصف عبر Claude (YES => مكرر، NO => جديد)
                 verified_approved_rows = []
                 verified_rejected_rows = []
@@ -5147,6 +5349,7 @@ if st.session_state.page == "pipeline":
                         size = "100 مل"
                     else:
                         size = f"{int(size_s) if size_s == int(size_s) else size_s} مل"
+                    size = _normalize_product_size_ml(size) or size
                     conc   = attrs.get("concentration") or "EDP"
                     conc_ar = conc_map_ar.get(conc, conc if conc != "غير محدد" else "أو دو بارفيوم")
                     is_t   = "تستر" in attrs.get("type", "")
@@ -5213,7 +5416,15 @@ if st.session_state.page == "pipeline":
 
                     pname  = standardize_product_name(pname, brand_d.get("name", ""))
                     cat    = match_category(pname, gender_kw)
-                    seo    = gen_seo(pname, brand_d, str(size), is_t, gender_kw)
+
+                    pi_idx += 1
+                    sku_slug = f"V-{pi_idx}"
+                    th_pipe = str(attrs.get("type", "") or "")
+                    seo    = gen_seo(
+                        pname, brand_d, str(size), is_t, gender_kw,
+                        sku_suffix=sku_slug,
+                        type_hint=th_pipe,
+                    )
 
                     if not str(pimg).strip():
                         pimg = fetch_image(pname, is_t)
@@ -5225,7 +5436,6 @@ if st.session_state.page == "pipeline":
                         except Exception:
                             desc = ""
 
-                    pi_idx += 1
                     r = fill_row(
                         name=pname, price=str(pprice), sku="",
                         image=pimg, desc=desc, brand=brand_d,
@@ -5869,8 +6079,17 @@ elif st.session_state.page == "quickadd":
                     # Extract size from name
                     size_match = re.search(r'(\d+)\s*(?:ml|مل|ML)', ex_name, re.IGNORECASE)
                     ex_size = size_match.group(0) if size_match else "100 مل"
+                    ex_size = _normalize_product_size_ml(ex_size) or ex_size
 
-                    seo = gen_seo(ex_name, brand, ex_size, False, "للجنسين") if qa_url_gen_seo else {"url": "", "title": "", "desc": ""}
+                    _qa_sku = f"V-{len(st.session_state.get('qa_rows', [])) + 1}"
+                    seo = (
+                        gen_seo(
+                            ex_name, brand, ex_size, False, "للجنسين",
+                            sku_suffix=_qa_sku,
+                        )
+                        if qa_url_gen_seo
+                        else {"url": "", "title": "", "desc": ""}
+                    )
 
                     # Generate AI description
                     if qa_url_gen_desc and st.session_state.api_key:
@@ -5946,7 +6165,11 @@ elif st.session_state.page == "quickadd":
                         brand  = match_brand(qa_nm)
                     
                     cat    = match_category(qa_nm, qa_gn)
-                    seo    = gen_seo(qa_nm, brand, qa_sz, is_t, qa_gn)
+                    qa_sku_slug = qa_sk.strip() if qa_sk.strip() else f"V-{len(st.session_state.get('qa_rows', [])) + 1}"
+                    seo    = gen_seo(
+                        qa_nm, brand, qa_sz, is_t, qa_gn,
+                        sku_suffix=qa_sku_slug,
+                    )
                     
                     # Handle Images
                     img_url = ""

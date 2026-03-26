@@ -288,6 +288,26 @@ def validate_export_seo_dataframe(df: Optional[pd.DataFrame]) -> tuple[bool, lis
     return len(issues) == 0, issues
 
 
+def format_salla_date_yyyy_mm_dd(val) -> str:
+    """تطبيع تواريخ حقول سلة (تخفيضات) إلى YYYY-MM-DD أو سلسلة فارغة."""
+    if val is None or (isinstance(val, float) and pd.isna(val)):
+        return ""
+    s = str(val).strip()
+    if not s or s.lower() in ("nan", "none", "nat"):
+        return ""
+    if re.match(r"^\d{4}-\d{2}-\d{2}$", s):
+        return s
+    try:
+        ts = pd.to_datetime(s, errors="coerce", dayfirst=False)
+        if pd.isna(ts):
+            ts = pd.to_datetime(s, errors="coerce", dayfirst=True)
+        if pd.isna(ts):
+            return ""
+        return ts.strftime("%Y-%m-%d")
+    except Exception:
+        return ""
+
+
 def validate_export_brands_list(brands: list) -> tuple[bool, list]:
     issues = []
     if not brands:
