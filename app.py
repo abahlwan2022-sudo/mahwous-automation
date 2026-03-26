@@ -488,6 +488,7 @@ def _init_state():
         "pipe_fx_volume":      False,
         "pipe_filter_stats":   None,  # dict إحصائيات آخر تطبيق للفلاتر
         "pipe_store_dedup_dropped": 0,  # صفوف أُزيلت لأنها موجودة في ملف المتجر
+        "pipe_missing_brands_df": None,  # ماركات غير معروفة مستخرجة من المنافسين
         # Page
         "page":           "pipeline",
     }
@@ -2801,7 +2802,7 @@ def render_seo_processor_tab():
             return
 
     with st.expander("👀 معاينة الملف", expanded=False):
-        st.dataframe(sdf.head(12), width="stretch")
+        st.dataframe(sdf.head(12), use_container_width=True)
 
     if st.button("🚀 بدء المعالجة", type="primary", key="seo_proc_tab_run", use_container_width=True):
         if not st.session_state.api_key:
@@ -2853,7 +2854,7 @@ def render_seo_processor_tab():
         <h3>نتيجة التوليد (تنسيق سلة SEO)</h3></div>""", unsafe_allow_html=True)
         edited_df = st.data_editor(
             output_df.fillna(""),
-            width="stretch",
+            use_container_width=True,
             num_rows="dynamic",
             key="seo_proc_tab_editor",
         )
@@ -3443,8 +3444,155 @@ def render_compare_tab():
             <div class="uz-title">ارفع ملف المنتجات الجديدة وملف المتجر</div>
             <div class="uz-sub">أو أكمل المسار الآلي واضغط زر الانتقال للمقارنة المرئي</div>
             </div>""", unsafe_allow_html=True)
+def _normalize_simple_brand_token(s: str) -> str:
+    return re.sub(r"\s+", " ", str(s or "").strip())
 
 
+def _extract_brand_from_name_first_words(name: str) -> str:
+    """استنتاج ماركة مرجحة من أول 2-3 كلمات في الاسم."""
+    if not name:
+        return ""
+    n = str(name).strip()
+    n = re.sub(r"^(?:عطر|تستر|تيستر|perfume|tester)\s+", "", n, flags=re.IGNORECASE).strip()
+    words = [w for w in n.split() if w and w not in ("-", "—", "–")]
+    if not words:
+        return ""
+    cands = []
+    if len(words) >= 3:
+        cands.append(" ".join(words[:3]))
+    if len(words) >= 2:
+        cands.append(" ".join(words[:2]))
+    cands.append(words[0])
+    for c in cands:
+        if is_discount_like_brand(c):
+            continue
+        if re.fullmatch(r"[\d\W_]+", c):
+            continue
+        return _normalize_simple_brand_token(c)
+    return ""
+
+
+def _fuzzy_ratio_local(a: str, b: str) -> float:
+    a = _normalize_simple_brand_token(a).lower()
+    b = _normalize_simple_brand_token(b).lower()
+    if not a or not b:
+        return 0.0
+    if HAS_RAPIDFUZZ:
+        try:
+            return float(rf_fuzz.token_sort_ratio(a, b))
+        except Exception:
+            pass
+    aw = set(a.split())
+    bw = set(b.split())
+    if not aw or not bw:
+        return 0.0
+    return 100.0 * len(aw & bw) / len(aw | bw)
+
+
+def _collect_known_brand_names(pipe_store_df: pd.DataFrame, brands_df: pd.DataFrame) -> list:
+    names = []
+    if brands_df is not None and not brands_df.empty:
+        bcol = brands_df.columns[0]
+        for v in brands_df[bcol].dropna().astype(str):
+            raw = v.strip()
+            if not raw:
+                continue
+            parts = [p.strip() for p in re.split(r"\s*\|\s*", raw) if p.strip()]
+            names.extend(parts if parts else [raw])
+    if pipe_store_df is not None and not pipe_store_df.empty and "الماركة" in pipe_store_df.columns:
+        for v in pipe_store_df["الماركة"].dropna().astype(str):
+            raw = v.strip()
+            if not raw:
+                continue
+            parts = [p.strip() for p in re.split(r"\s*\|\s*", raw) if p.strip()]
+            names.extend(parts if parts else [raw])
+    out = []
+    seen = set()
+    for n in names:
+        k = n.lower()
+        if k in seen:
+            continue
+        seen.add(k)
+        out.append(n)
+    return out
+
+
+def _build_missing_brands_df_from_competitors(
+    comp_df: pd.DataFrame,
+    name_col: str,
+    known_brands: list,
+    threshold: float = 80.0,
+) -> pd.DataFrame:
+    if comp_df is None or comp_df.empty or name_col not in comp_df.columns:
+        return pd.DataFrame(columns=SALLA_BRANDS_COLS)
+    rows = []
+    seen = set()
+    for nm in comp_df[name_col].fillna("").astype(str):
+        cand = _extract_brand_from_name_first_words(nm)
+        if not cand:
+            continue
+        best_score = 0.0
+        for kb in known_brands:
+            sc = _fuzzy_ratio_local(cand, kb)
+            if sc > best_score:
+                best_score = sc
+        if best_score >= threshold:
+            continue
+        key = cand.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        rows.append({
+            "اسم الماركة": cand,
+            "وصف مختصر عن الماركة": "",
+            "صورة شعار الماركة": "",
+            "(إختياري) صورة البانر": "",
+            "(Page Title) عنوان صفحة العلامة التجارية": f"عطور {cand} الأصلية | مهووس",
+            "(SEO Page URL) رابط صفحة العلامة التجارية": to_slug(cand),
+            "(Page Description) وصف صفحة العلامة التجارية": "",
+        })
+    return pd.DataFrame(rows, columns=SALLA_BRANDS_COLS)
+
+
+def _ai_enrich_brand_row_with_domain(brand_name: str, api_key: str) -> dict:
+    empty = {"description": "", "seo_description": "", "domain": ""}
+    if not brand_name or not api_key or not HAS_ANTHROPIC:
+        return empty
+    try:
+        client = anthropic.Anthropic(api_key=api_key)
+        prompt = (
+            "أنت خبير عالمي في ماركات العطور.\n"
+            f"الماركة: {brand_name}\n\n"
+            "أعد JSON فقط بدون أي نص خارج JSON بالمفاتيح التالية حرفياً:\n"
+            '{"description":"...", "seo_description":"...", "domain":"..."}\n'
+            "الشروط:\n"
+            "- description: وصف عربي قصير جذاب (20-35 كلمة)\n"
+            "- seo_description: وصف صفحة عربي SEO مناسب (حتى 160 حرف)\n"
+            "- domain: الدومين الرسمي فقط بدون http/https أو مسار (مثال: chanel.com)\n"
+            "- إذا تعذر تحديد الدومين بدقة أعد domain فارغاً."
+        )
+        msg = client.messages.create(
+            model="claude-3-haiku-20240307",
+            max_tokens=350,
+            temperature=0.1,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        raw = msg.content[0].text.strip()
+        m = re.search(r"\{[\s\S]*\}", raw)
+        if not m:
+            return empty
+        data = json.loads(m.group())
+        dom = str(data.get("domain", "") or "").strip().lower()
+        dom = re.sub(r"^https?://", "", dom).split("/")[0].strip()
+        if dom and "." not in dom:
+            dom = ""
+        return {
+            "description": str(data.get("description", "") or "").strip(),
+            "seo_description": str(data.get("seo_description", "") or "").strip(),
+            "domain": dom,
+        }
+    except Exception:
+        return empty
 
 
 def render_store_audit_tab():
@@ -3677,7 +3825,7 @@ def render_store_audit_tab():
                     display_cols = ["No.", "أسم المنتج", "الماركة", "تصنيف المنتج", "_issues"]
                     st.dataframe(
                         filtered_audit[[c for c in display_cols if c in filtered_audit.columns]],
-                        width='stretch'
+                        use_container_width=True
                     )
 
                     # ── تصدير تدقيق الأسعار بنفس قالب سلة (42 عمود) ──
@@ -3963,6 +4111,7 @@ if st.session_state.page == "pipeline":
             st.session_state.pipe_new_brands = []
             st.session_state.pipe_seo_df     = None
             st.session_state.pipe_store_dedup_dropped = 0
+            st.session_state.pipe_missing_brands_df = None
             st.session_state.pipe_running    = True
             st.session_state.pipe_step       = 2
 
@@ -3992,6 +4141,7 @@ if st.session_state.page == "pipeline":
             _cn = auto_guess_col(comp_merged.columns,
                                  ["أسم المنتج","اسم","name","منتج"], comp_merged)
             comp_nm = (_cn if _cn != NONE_P else comp_merged.columns[0])
+            comp_br_guess = auto_guess_col(comp_merged.columns, ["ماركة", "brand", "label"], comp_merged)
             comp_img = auto_guess_col(comp_merged.columns, ["صورة","image","src","img","w-full src"], comp_merged)
             comp_pr  = auto_guess_col(comp_merged.columns, ["سعر","price","text-sm-2","text-sm","amount"], comp_merged)
             store_sk  = store_sk if store_sk != NONE_P else None
@@ -4009,6 +4159,20 @@ if st.session_state.page == "pipeline":
             if bdf_p is not None:
                 col0_p = bdf_p.columns[0]
                 brands_p = bdf_p[col0_p].dropna().astype(str).str.strip().tolist()
+
+            # عند غياب عمود ماركة المنافس: استنتج الماركة من أول كلمات الاسم
+            # ثم طابقها fuzzy مع ماركات ملف المتجر/brands.csv. غير المتطابق يُسجل كمفقود.
+            comp_br_missing = (not comp_br_guess) or (comp_br_guess == NONE_P) or (comp_br_guess not in comp_merged.columns)
+            if comp_br_missing:
+                known_brands = _collect_known_brand_names(store_df_p, bdf_p)
+                mb_df = _build_missing_brands_df_from_competitors(
+                    comp_merged,
+                    name_col=comp_nm,
+                    known_brands=known_brands,
+                    threshold=80.0,
+                )
+                if not mb_df.empty:
+                    st.session_state.pipe_missing_brands_df = mb_df
 
             opts = StrictFilterOptions(
                 exclude_samples_testers=st.session_state.get("pipe_fx_samples", False),
@@ -4359,7 +4523,7 @@ if st.session_state.page == "pipeline":
                 show_cols_p = show_default_p or all_pc[:10]
             edited_pipe = st.data_editor(
                 pdf[show_cols_p].fillna(""),
-                width="stretch",
+                use_container_width=True,
                 num_rows="dynamic",
                 height=440,
                 key="pipe_main_grid",
@@ -4532,6 +4696,55 @@ if st.session_state.page == "pipeline":
             with st.expander(f"🏷️ معاينة الماركات الجديدة ({len(new_brs)} ماركة)"):
                 st.dataframe(pd.DataFrame(new_brs), use_container_width=True)
 
+        # ماركات مفقودة مستخرجة من المنافس (عند غياب عمود الماركة) + إثراء AI + شعار تلقائي
+        mb_df = st.session_state.get("pipe_missing_brands_df")
+        if mb_df is not None and not mb_df.empty:
+            st.markdown("""<hr class="gdiv"><div class="sec-title"><div class="bar"></div>
+            <h3>ماركات مفقودة للرفع أولاً</h3></div>""", unsafe_allow_html=True)
+            st.caption("تم استخراجها من أول كلمات اسم المنتج في ملفات المنافسين لأنها غير موجودة في مرجع الماركات (عتبة تطابق 80٪).")
+            if st.button("✨ بدء الإثراء بالذكاء الاصطناعي", key="pipe_enrich_missing_brands", type="primary"):
+                if not st.session_state.api_key:
+                    st.error("أضف مفتاح Anthropic API من صفحة الإعدادات أولاً.")
+                else:
+                    w = mb_df.copy()
+                    prog = st.progress(0)
+                    for i in range(len(w)):
+                        bname = str(w.iloc[i].get("اسم الماركة", "") or "").strip()
+                        if not bname:
+                            prog.progress(int((i + 1) / max(len(w), 1) * 100))
+                            continue
+                        ai_b = _ai_enrich_brand_row_with_domain(bname, st.session_state.api_key)
+                        if ai_b.get("description"):
+                            w.at[w.index[i], "وصف مختصر عن الماركة"] = ai_b["description"]
+                        if ai_b.get("seo_description"):
+                            w.at[w.index[i], "(Page Description) وصف صفحة العلامة التجارية"] = ai_b["seo_description"]
+                        dom = ai_b.get("domain", "")
+                        w.at[w.index[i], "صورة شعار الماركة"] = f"https://logo.clearbit.com/{dom}" if dom else ""
+                        if not str(w.iloc[i].get("(Page Title) عنوان صفحة العلامة التجارية", "") or "").strip():
+                            w.at[w.index[i], "(Page Title) عنوان صفحة العلامة التجارية"] = f"عطور {bname} الأصلية | مهووس"
+                        if not str(w.iloc[i].get("(SEO Page URL) رابط صفحة العلامة التجارية", "") or "").strip():
+                            w.at[w.index[i], "(SEO Page URL) رابط صفحة العلامة التجارية"] = to_slug(bname)
+                        prog.progress(int((i + 1) / max(len(w), 1) * 100))
+                    st.session_state.pipe_missing_brands_df = w[SALLA_BRANDS_COLS].copy()
+                    st.success("✅ اكتمل إثراء الماركات المفقودة.")
+                    st.rerun()
+
+            edited_mb = st.data_editor(
+                st.session_state.pipe_missing_brands_df[SALLA_BRANDS_COLS].fillna(""),
+                num_rows="dynamic",
+                use_container_width=True,
+                key="pipe_missing_brands_editor",
+            )
+            st.session_state.pipe_missing_brands_df = edited_mb[SALLA_BRANDS_COLS].copy()
+            st.download_button(
+                "📥 تنزيل ماركات_جديدة_للرفع_أولا.csv",
+                edited_mb[SALLA_BRANDS_COLS].to_csv(index=False, encoding="utf-8-sig"),
+                "ماركات_جديدة_للرفع_أولا.csv",
+                "text/csv",
+                use_container_width=True,
+                key="pipe_missing_brands_dl_csv",
+            )
+
         # إعادة الضبط
         st.divider()
         if st.button("🔄 مسار جديد (إعادة ضبط)", key="pipe_reset"):
@@ -4540,6 +4753,7 @@ if st.session_state.page == "pipeline":
             st.session_state.pipe_results    = None
             st.session_state.pipe_approved   = None
             st.session_state.pipe_new_brands = []
+            st.session_state.pipe_missing_brands_df = None
             st.session_state.pipe_seo_df     = None
             st.session_state.pipe_step       = 0
             st.rerun()
@@ -4593,7 +4807,7 @@ elif st.session_state.page == "seo_processor":
     if st.session_state.seo_proc_df is not None:
         sdf = st.session_state.seo_proc_df
         with st.expander("👀 معاينة الملف", expanded=False):
-            st.dataframe(sdf.head(12), width="stretch")
+            st.dataframe(sdf.head(12), use_container_width=True)
 
         if st.button("🤖 تحليل وإكمال SEO الناقص", type="primary", key="seo_proc_run", use_container_width=True):
             if not st.session_state.api_key:
@@ -4615,7 +4829,7 @@ elif st.session_state.page == "seo_processor":
             else:
                 st.markdown("""<div class="sec-title"><div class="bar"></div>
                 <h3>نتيجة التوليد (تنسيق سلة SEO)</h3></div>""", unsafe_allow_html=True)
-                st.data_editor(gen_df.fillna(""), width="stretch", num_rows="dynamic", key="seo_proc_editor")
+                st.data_editor(gen_df.fillna(""), use_container_width=True, num_rows="dynamic", key="seo_proc_editor")
                 date_s = datetime.now().strftime("%Y-%m-%d_%H-%M")
                 st.download_button(
                     "📥 تصدير SEO — Excel (المُولّد فقط)",
@@ -4894,7 +5108,7 @@ elif st.session_state.page == "quickadd":
                 "وصف ✓":   "✅" if str(p.get("الوصف","")).strip() else "—",
                 "صورة ✓":  "✅" if str(p.get("صورة المنتج","")).startswith("http") else "—",
             })
-        st.dataframe(pd.DataFrame(prev), width='stretch')
+        st.dataframe(pd.DataFrame(prev), use_container_width=True)
 
         prod_df_qa = pd.DataFrame([r["product"] for r in st.session_state.qa_rows])
         seo_df_qa  = pd.DataFrame([{
@@ -4980,7 +5194,7 @@ elif st.session_state.page == "settings":
         if bdf is not None:
             st.markdown(f'<div class="al-ok">{len(bdf)} ماركة محملة</div>',
                         unsafe_allow_html=True)
-            with st.expander("👀 معاينة"): st.dataframe(bdf.head(5), width='stretch')
+            with st.expander("👀 معاينة"): st.dataframe(bdf.head(5), use_container_width=True)
         up_brands = st.file_uploader("تحديث ملف الماركات:", type=["csv","xlsx"],
                                       key="up_brands_db")
         if up_brands:
@@ -4999,7 +5213,7 @@ elif st.session_state.page == "settings":
         if cdf is not None:
             st.markdown(f'<div class="al-ok">{len(cdf)} تصنيف محمّل</div>',
                         unsafe_allow_html=True)
-            with st.expander("👀 معاينة"): st.dataframe(cdf.head(5), width='stretch')
+            with st.expander("👀 معاينة"): st.dataframe(cdf.head(5), use_container_width=True)
         up_cats = st.file_uploader("تحديث ملف التصنيفات:", type=["csv","xlsx"],
                                     key="up_cats_db")
         if up_cats:
@@ -5019,7 +5233,7 @@ elif st.session_state.page == "settings":
         st.markdown(f'<div class="al-warn">{len(st.session_state.new_brands)} ماركة جديدة اكتُشفت خلال المعالجة وتحتاج إلى إضافتها لمتجرك على سلة.</div>',
                     unsafe_allow_html=True)
         nb_df_s = pd.DataFrame(st.session_state.new_brands)
-        st.dataframe(nb_df_s, width='stretch')
+        st.dataframe(nb_df_s, use_container_width=True)
         sn1, sn2 = st.columns(2)
         with sn1:
             st.download_button("📥 تصدير الماركات الجديدة — Excel",
