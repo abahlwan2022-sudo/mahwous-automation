@@ -2735,6 +2735,52 @@ def _infer_gender_from_text(text: str) -> str:
     return "للجنسين"
 
 
+_JUNK_CLEAN_NAME_PHRASES = (
+    "بدون غطاء", "بدون كرتون", "بدون علبة", "إصدار قديم", "بدون غطا",
+)
+
+_DEFAULT_NOTE_TOP = "حمضيات، برغموت، ليمون"
+_DEFAULT_NOTE_HEART = "ورد، ياسمين، إيريس"
+_DEFAULT_NOTE_BASE = "مسك، عنبر، خشب صندل"
+
+
+def _strip_junk_phrases_from_clean_name(s: str) -> str:
+    t = str(s or "")
+    for j in _JUNK_CLEAN_NAME_PHRASES:
+        t = re.sub(re.escape(j), " ", t, flags=re.IGNORECASE)
+    t = re.sub(r"\s+", " ", t).strip()
+    return t
+
+
+def _strip_type_words_from_clean_name_for_display(clean_name: str, ai_type: str) -> str:
+    """يمنع تكرار نوع المنتج داخل clean_name (مثل «عطر» + نوع «طقم»)."""
+    cn = str(clean_name or "").strip()
+    if not cn:
+        return cn
+    if ai_type == "طقم":
+        cn = re.sub(r"^(?:عطر|تستر|تيستر|مجموعة)\s+", "", cn, flags=re.IGNORECASE).strip()
+    elif ai_type in ("عطر", "تستر"):
+        cn = re.sub(r"^(?:عطر|تستر|تيستر)\s+", "", cn, count=1, flags=re.IGNORECASE).strip()
+    return cn
+
+
+def _normalize_ai_notes_triplet(
+    top: str, heart: str, base: str,
+) -> tuple[str, str, str]:
+    """لا يُسمح بـ «غير متوفر» في الهرم العطري — بدائل منطقية."""
+    def _one(v: str, fb: str) -> str:
+        s = str(v or "").strip()
+        if not s or s in ("غير متوفر", "غير معروف", "N/A", "n/a", "unknown"):
+            return fb
+        return s
+
+    return (
+        _one(top, _DEFAULT_NOTE_TOP),
+        _one(heart, _DEFAULT_NOTE_HEART),
+        _one(base, _DEFAULT_NOTE_BASE),
+    )
+
+
 def _build_html_description_from_product_ai_parts(
     *,
     formatted_name: str,
@@ -2800,7 +2846,7 @@ def _build_html_description_from_product_ai_parts(
     h.append("<ul>")
     h.append(f"<li><strong>الثبات والفوحان:</strong> تركيز {concentration} يضمن فوحاناً يدوم طويلاً يلفت الأنظار.</li>")
     h.append(f"<li><strong>التميز والأصالة:</strong> من دار {brand_name} العريقة بتراث عطري أصيل.</li>")
-    h.append("<li><strong>القيمة الاستثنائية:</strong> عطر فاخر بسعر مناسب من متجر مهووس الموثوق.</li>")
+    h.append("<li><strong>القيمة الاستثنائية:</strong> عطر فاخر بجودة استثنائية من متجر مهووس الموثوق.</li>")
     h.append("<li><strong>الجاذبية المضمونة:</strong> عطر يجعلك محور الاهتمام في كل مكان تحضره.</li>")
     h.append("</ul>")
 
@@ -2818,18 +2864,18 @@ def _build_html_description_from_product_ai_parts(
     h.append("<li><strong>كم يدوم العطر؟</strong> بين 8-12 ساعة حسب البشرة ودرجة الحرارة.</li>")
     h.append("<li><strong>هل يناسب الاستخدام اليومي؟</strong> نعم، بكمية معتدلة للبيئات المختلفة.</li>")
     if tester_flag:
-        h.append("<li><strong>ما الفرق بين التستر والعطر العادي؟</strong> التستر نفس العطر تماماً بدون علبة خارجية، بسعر أقل.</li>")
+        h.append(
+            "<li><strong>ما الفرق بين التستر والعطر العادي؟</strong> "
+            "التستر نفس العطر تماماً بدون علبة خارجية، بتغليف مبسّط يناسب الاستخدام الشخصي.</li>"
+        )
     h.append(f"<li><strong>هل يناسب الطقس الحار في السعودية؟</strong> {season} هي الموسم المثالي له.</li>")
     h.append("<li><strong>ما مناسبات ارتداء هذا العطر؟</strong> المناسبات الرسمية، السهرات، واللقاءات العملية.</li>")
     h.append("</ul>")
 
     h.append("<h3>اكتشف أكثر من مهووس</h3>")
-    if brand_page_url:
-        h.append(
-            f"<p>اكتشف <a href='{mahwous_brand_url(brand_page_url)}' target='_blank' rel='noopener'>عطور {brand_name}</a> | "
-            f"<a href='{mahwous_category_url('categories/mens-perfumes')}' target='_blank' rel='noopener'>عطور رجالية</a> | "
-            f"<a href='{mahwous_category_url('categories/womens-perfumes')}' target='_blank' rel='noopener'>عطور نسائية</a></p>"
-        )
+    h.append(
+        f"<p><a href=\"{MAHWOUS_SITE_BASE}/\" target=\"_blank\" rel=\"noopener\">متجر مهووس</a></p>"
+    )
     h.append("<p><strong>عالمك العطري يبدأ من مهووس.</strong> أصلي 100% | شحن سريع داخل السعودية.</p>")
     return "\n".join(h)
 
@@ -2858,25 +2904,31 @@ def _ai_enrich_product_row(raw_competitor_product_name: str, api_key: str) -> di
         prompt = (
             "أنت خبير إدخال بيانات + خبير عطور (Master Perfumer).\n"
             "استخرج من اسم منتج المنافس حقولاً دقيقة جداً.\n\n"
-            f"الاسم الخام: {raw_competitor_product_name}\n\n"
+            f"الاسم الخام من المنافس (للمرجع فقط — لا تنسخه حرفياً في الوصف النهائي): {raw_competitor_product_name}\n\n"
             "أعد JSON فقط (بدون أي نص خارج JSON) بمفاتيح عربية حرفياً:\n"
             "{"
-            "\"type\":\"(يجب أن يكون من القائمة تماماً)\","
+            "\"type\":\"\","
             "\"clean_name\":\"\","
             "\"brand\":\"(Arabic | English)\","
             "\"concentration\":\"\","
-            "\"size\":\"(مثل 100 مل)\","
+            "\"size\":\"\","
             "\"top_notes\":\"\","
             "\"heart_notes\":\"\","
             "\"base_notes\":\"\""
             "}\n\n"
-            "القواعد الصارمة:\n"
-            f"1) type يجب أن يكون واحداً فقط من: {allowed_types}\n"
-            "2) clean_name: اسم الرائحة الأساسي فقط بدون brand وبدون size وبدون نوع المنتج، وبلا كلمات قمامة مثل (بدون غطاء، إصدار قديم...) حتى لو كانت موجودة.\n"
-            "3) brand: الاسم الرسمي للماركة فقط بصيغة \"Arabic_Name | English_Name\" إن أمكن. إن لم تكن الماركة واضحة: أعد \"\".\n"
-            "4) concentration: اختر صيغة عربية صحيحة مثل \"أو دو بارفيوم\" أو \"أو دو تواليت\" أو \"بارفيوم\".\n"
-            "5) size: أعد الحجم كما في الاسم بصيغة عربية مثل \"100 مل\". إن لم يوجد: أعد \"\".\n"
-            "6) top_notes/heart_notes/base_notes: مكونات حقيقية للرائحة (كتابة عربية مفهومة مفصولة بفواصل).\n"
+            "قواعد إلزامية:\n"
+            f"1) type واحد فقط من: {allowed_types}\n"
+            "2) clean_name: اسم الرائحة/الخط فقط — بدون ماركة، بدون حجم، بدون تركيز، بدون نوع المنتج في الاسم. "
+            "احذف تماماً عبارات مثل: «بدون غطاء»، «بدون كرتون»، «تستر»، «تيستر»، «tester» إن وُجدت في الاسم.\n"
+            "3) لا تكرّر نوع المنتج: إن كان type «طقم» فلا تبدأ clean_name بـ «عطر» أو «طقم» مكرر. "
+            "إن كان type «عطر» فلا تكرّر كلمة «عطر» داخل clean_name.\n"
+            "4) brand بصيغة \"عربي | English\" إن أمكن؛ وإلا أعد \"\".\n"
+            "5) concentration بصيغة عربية صحيحة (مثل أو دو بارفيوم، أو دو تواليت، بارفيوم).\n"
+            "6) size مثل «100 مل» إن وُجد في الاسم؛ وإلا استنتج المعتاد للخط أو أعد \"\".\n"
+            "7) top_notes / heart_notes / base_notes: مكونات عربية مفصولة بفواصل. "
+            "استخدم معرفتك بالعطر إن أمكن؛ وإن لم تتأكد استخدم مكونات منطقية للعائلة العطرية للماركة. "
+            "ممنوع تماماً إخراج «غير متوفر» أو ترك الحقول فارغة — املأها دائماً بمكونات معقولة.\n"
+            "8) لا تُدرج أي سعر أو رمز عملة أو رقم يشبه السعر في أي حقل.\n"
         )
         msg = client.messages.create(
             model="claude-3-haiku-20240307",
@@ -2894,6 +2946,8 @@ def _ai_enrich_product_row(raw_competitor_product_name: str, api_key: str) -> di
             ai_type = "عطر"
 
         clean_name = str(data.get("clean_name", "") or "").strip()
+        clean_name = _strip_junk_phrases_from_clean_name(clean_name)
+        clean_name = _strip_type_words_from_clean_name_for_display(clean_name, ai_type)
         brand_raw = str(data.get("brand", "") or "").strip()
         conc = str(data.get("concentration", "") or "").strip()
         size = str(data.get("size", "") or "").strip()
@@ -2904,23 +2958,23 @@ def _ai_enrich_product_row(raw_competitor_product_name: str, api_key: str) -> di
         if not clean_name or not brand_raw or not conc or not size:
             return empty
 
-        # تنظيف brand خوفاً من تسرب كلمات توقّف داخل الماركة
         brand_clean = _clean_brand_value_for_salla_output(brand_raw)
         if not brand_clean:
             return empty
 
-        formatted_name = f"{ai_type} {clean_name} {brand_clean} {conc} {size}".strip()
+        top, heart, base = _normalize_ai_notes_triplet(top, heart, base)
 
-        # قدر الإمكان نحاول إيجاد slug للربط داخل MAHWOUS
+        formatted_name = f"{ai_type} {clean_name} {brand_clean} {conc} {size}".strip()
+        formatted_name = re.sub(r"\s+", " ", formatted_name).strip()
+
         bmatch = match_brand(brand_clean) if st.session_state.get("brands_df", None) is not None else {"name": brand_clean, "page_url": ""}
         brand_page_url = str(bmatch.get("page_url", "") or "").strip()
         if not brand_page_url:
-            # fallback slug من الجزء الإنجليزي
             parts = [p.strip() for p in str(brand_clean).split("|", 1)]
             en_part = parts[1] if len(parts) == 2 else parts[0]
             brand_page_url = to_slug(en_part)
 
-        gender_txt = _infer_gender_from_text(raw_competitor_product_name)
+        gender_txt = _infer_gender_from_text(formatted_name + " " + raw_competitor_product_name)
 
         html = _build_html_description_from_product_ai_parts(
             formatted_name=formatted_name,
@@ -2930,9 +2984,9 @@ def _ai_enrich_product_row(raw_competitor_product_name: str, api_key: str) -> di
             brand_page_url=brand_page_url,
             concentration=conc,
             size=size,
-            top_notes=top if top else "غير متوفر",
-            heart_notes=heart if heart else "غير متوفر",
-            base_notes=base if base else "غير متوفر",
+            top_notes=top,
+            heart_notes=heart,
+            base_notes=base,
             gender=gender_txt,
         )
 
@@ -3039,6 +3093,33 @@ def _prepare_salla_product_df_for_export(df: pd.DataFrame) -> pd.DataFrame:
     df["سعر المنتج"] = df["سعر المنتج"].apply(sanitize_salla_price_for_export)
     df["السعر المخفض"] = df["السعر المخفض"].apply(sanitize_salla_price_for_export)
     df["الماركة"] = df["الماركة"].apply(_clean_brand_value_for_salla_output)
+    # SKU: بادئة V- لتقليل التصادم مع رموز المتجر (#33)
+    if "رمز المنتج sku" in df.columns:
+
+        def _export_sku_row(row) -> str:
+            s = str(row.get("رمز المنتج sku", "") or "").strip()
+            if s and s.lower() not in ("nan", "none"):
+                if re.match(r"^v-", s, re.IGNORECASE):
+                    rest = s[2:].strip()
+                    return f"V-{rest}" if rest else ""
+                return f"V-{s}"
+            no = str(row.get("No.", "") or "").strip()
+            if no and no.lower() not in ("nan", "none"):
+                return f"V-{no}"
+            return ""
+
+        df["رمز المنتج sku"] = df.apply(_export_sku_row, axis=1)
+    # وزن حسب نوع المنتج في الاسم (#34)
+    if "أسم المنتج" in df.columns:
+        df["الوزن"] = df["أسم المنتج"].apply(
+            lambda n: "0.5" if "طقم" in str(n) else "0.2"
+        )
+    df["وحدة الوزن"] = "kg"
+    # تصنيف كامل من الاسم المعياري (#40)
+    if "أسم المنتج" in df.columns:
+        df["تصنيف المنتج"] = df["أسم المنتج"].apply(
+            lambda n: match_category(str(n), "")
+        )
     return df
 
 
@@ -5320,8 +5401,11 @@ if st.session_state.page == "pipeline":
                     with st.spinner(f"جاري إثراء المنتج ({n+1}/{total}): {raw_nm[:55]}..."):
                         ai_out = _ai_enrich_product_row(raw_nm, st.session_state.api_key)
                     if ai_out.get("formatted_name") and ai_out.get("html_description"):
-                        pdf.at[ix, "أسم المنتج"] = ai_out.get("formatted_name", raw_nm)
+                        fn = ai_out.get("formatted_name", raw_nm)
+                        pdf.at[ix, "أسم المنتج"] = fn
                         pdf.at[ix, "الوصف"] = ai_out.get("html_description", pdf.at[ix, "الوصف"])
+                        if "وصف صورة المنتج" in pdf.columns:
+                            pdf.at[ix, "وصف صورة المنتج"] = f"زجاجة {fn} الأصلية"
                         if "الماركة" in pdf.columns and ai_out.get("brand"):
                             pdf.at[ix, "الماركة"] = _clean_brand_value_for_salla_output(ai_out.get("brand", ""))
                     prog.progress(int((n + 1) / max(total, 1) * 100))
