@@ -3455,6 +3455,11 @@ def render_compare_tab():
                         if col not in final_cmp.columns:
                             final_cmp[col] = ""
                     final_cmp = final_cmp[[c for c in SALLA_COLS if c in final_cmp.columns]]
+                    # Salla: النظامية (System fields) يجب أن تكون حرفياً لكل صف
+                    if "النوع " in final_cmp.columns:
+                        final_cmp["النوع "] = "منتج"
+                    if "نوع المنتج" in final_cmp.columns:
+                        final_cmp["نوع المنتج"] = "منتج جاهز"
                     st.session_state.cmp_export_df = final_cmp
                     st.success(f"✅ {len(final_cmp)} منتج في القائمة النهائية")
                 else:
@@ -3506,8 +3511,13 @@ def _clean_product_name_for_brand_search(name: str) -> str:
     txt = str(name).lower()
     txt = strip_trailing_discount_label(txt)
     txt = re.sub(r"\d+(?:[.,]\d+)?\s*(?:مل|ml|oz|غرام|جرام)\b", " ", txt, flags=re.IGNORECASE)
+    # نزيل كلمات التوقّف بدون الاعتماد على `\b` لأن حدود الكلمات العربية عبر صياغات/علامات الترقيم قد تفشل،
+    # وهذا يؤدي لظهور "تستر ..." أو "عطر ..." كجزء من اسم الماركة.
     for sw in _BRAND_STOP_WORDS:
-        txt = re.sub(rf"\b{re.escape(sw.lower())}\b", " ", txt, flags=re.IGNORECASE)
+        sw_l = str(sw).lower().strip()
+        if not sw_l:
+            continue
+        txt = re.sub(re.escape(sw_l), " ", txt, flags=re.IGNORECASE)
     txt = re.sub(r"[^\w\u0600-\u06FF\s]", " ", txt)
     txt = re.sub(r"\s+", " ", txt).strip()
     return txt
@@ -3627,6 +3637,16 @@ def _build_missing_brands_df_from_competitors(
         cand = _extract_brand_from_name_first_words(cleaned)
         if not cand:
             continue
+
+        # إذا استنتجنا ماركة جديدة (Fallback)، نزيل كلمات/عبارات التستر/العطر... بشكل عدواني
+        # قبل حفظها كـ "ماركة مفقودة" حتى لا تتجاوز القاموس وتُوسَم خطأ.
+        cand = re.sub(r"(?:تستر|عطر|طقم|مجموعة)", " ", cand, flags=re.IGNORECASE)
+        cand = re.sub(r"مزيل\s+عرق", " ", cand, flags=re.IGNORECASE)
+        cand = re.sub(r"\s+", " ", cand).strip()
+        cand = _normalize_simple_brand_token(cand)
+        if not cand:
+            continue
+
         best_score = 0.0
         for kb in known_brands:
             sc = _fuzzy_ratio_local(cand, kb)
@@ -3651,7 +3671,14 @@ def _build_missing_brands_df_from_competitors(
 
 
 def _ai_enrich_brand_row_with_domain(brand_name: str, api_key: str) -> dict:
-    empty = {"description": "", "seo_description": "", "domain": ""}
+    empty = {
+        "brand_name": "",
+        "description": "",
+        "page_title": "",
+        "page_url": "",
+        "seo_description": "",
+        "domain": "",
+    }
     if not brand_name or not api_key or not HAS_ANTHROPIC:
         return empty
     try:
@@ -3660,12 +3687,15 @@ def _ai_enrich_brand_row_with_domain(brand_name: str, api_key: str) -> dict:
             "أنت خبير عالمي في ماركات العطور.\n"
             f"الماركة: {brand_name}\n\n"
             "أعد JSON فقط بدون أي نص خارج JSON بالمفاتيح التالية حرفياً:\n"
-            '{"description":"...", "seo_description":"...", "domain":"..."}\n'
+            '{"brand_name":"Arabic_Name | English_Name", "description":"...", "page_title":"...", "page_url":"...", "seo_description":"...", "domain":"..."}\n'
             "الشروط:\n"
-            "- description: وصف عربي قصير جذاب (20-35 كلمة)\n"
-            "- seo_description: وصف صفحة عربي SEO مناسب (حتى 160 حرف)\n"
-            "- domain: الدومين الرسمي فقط بدون http/https أو مسار (مثال: chanel.com)\n"
-            "- إذا تعذر تحديد الدومين بدقة أعد domain فارغاً."
+            "- brand_name: بصيغة صارمة \"Arabic_Name | English_Name\" (مع مسافة حول |) و يجب ألا يتجاوز 30 حرفاً بما في ذلك المسافات.\n"
+            "- description: وصف عربي احترافي ومختصر (لا يتجاوز 255 حرفاً).\n"
+            "- page_title: عنوان SEO (لا يتجاوز 70 حرفاً).\n"
+            "- page_url: بصيغة صارمة: \"[english_brand_name]_mahwous_store\" جميع الأحرف صغيرة و المسافات => underscores.\n"
+            "- seo_description: وصف عربي SEO (لا يتجاوز 155 حرفاً).\n"
+            "- domain: الدومين الرسمي فقط بدون http/https أو مسار (مثل: chanel.com).\n"
+            "- إذا تعذر تحديد أي حقل بدقة اعده كسلسلة فارغة فقط."
         )
         msg = client.messages.create(
             model="claude-3-haiku-20240307",
@@ -3678,13 +3708,80 @@ def _ai_enrich_brand_row_with_domain(brand_name: str, api_key: str) -> dict:
         if not m:
             return empty
         data = json.loads(m.group())
+
+        brand_name_raw = str(data.get("brand_name", "") or "").strip()
+        desc = str(data.get("description", "") or "").strip()
+        page_title = str(data.get("page_title", "") or "").strip()
+        seo_desc = str(data.get("seo_description", "") or "").strip()
         dom = str(data.get("domain", "") or "").strip().lower()
         dom = re.sub(r"^https?://", "", dom).split("/")[0].strip()
         if dom and "." not in dom:
             dom = ""
+
+        # enforce stop-word stripping inside Arabic part of brand_name
+        # (حتى لا ينتهي بنا الحال بعناوين مثل: "تستر فرزاتشي").
+        def _strip_brand_stop_words_from_ar_part(bn: str) -> str:
+            b = str(bn or "").strip()
+            if "|" in b:
+                ar_part, en_part = b.split("|", 1)
+                ar_part = ar_part.strip()
+                ar_part = re.sub(r"(?:تستر|عطر|طقم|مجموعة)", " ", ar_part, flags=re.IGNORECASE)
+                ar_part = re.sub(r"مزيل\s+عرق", " ", ar_part, flags=re.IGNORECASE)
+                ar_part = re.sub(r"\s+", " ", ar_part).strip()
+                return f"{ar_part} | {en_part.strip()}"
+            # if format isn't correct, just strip and keep
+            b = re.sub(r"(?:تستر|عطر|طقم|مجموعة)", " ", b, flags=re.IGNORECASE)
+            b = re.sub(r"مزيل\s+عرق", " ", b, flags=re.IGNORECASE)
+            b = re.sub(r"\s+", " ", b).strip()
+            return b
+
+        brand_name_raw = _strip_brand_stop_words_from_ar_part(brand_name_raw)
+
+        # enforce Salla limits in code (حتى لو Claude تجاوزها).
+        desc = desc[:255].strip()
+        seo_desc = seo_desc[:155].strip()
+        page_title = page_title[:70].strip()
+
+        # enforce brand_name format "Arabic | English" and max length <= 30.
+        if "|" in brand_name_raw:
+            parts = [p.strip() for p in brand_name_raw.split("|", 1)]
+            bn_final = f"{parts[0]} | {parts[1]}".strip()
+        else:
+            bn_final = f"{brand_name_raw} | {brand_name_raw}".strip()
+        if len(bn_final) > 30:
+            # نحتفظ بـ "| " قدر الإمكان عند التقصير.
+            if "|" in bn_final:
+                ar_part, en_part = bn_final.split("|", 1)
+                ar_part = ar_part.strip()
+                en_part = en_part.strip()
+                sep = " | "
+                available = 30 - len(sep)
+                if available > 0:
+                    ar_len_max = min(len(ar_part), available // 2 + available % 2)
+                    ar2 = ar_part[:ar_len_max].rstrip()
+                    en_len_max = max(0, available - len(ar2))
+                    en2 = en_part[:en_len_max].rstrip()
+                    bn_final = f"{ar2} | {en2}".strip()
+                else:
+                    bn_final = bn_final[:30].rstrip()
+            else:
+                bn_final = bn_final[:30].rstrip()
+
+        # compute page_url strictly from English brand part
+        en_part = ""
+        if "|" in bn_final:
+            en_part = bn_final.split("|", 1)[1].strip()
+        en_part = en_part.lower()
+        en_part = re.sub(r"[^a-z0-9\s_]", "", en_part)
+        en_part = re.sub(r"\s+", "_", en_part).strip("_")
+        page_url = f"{en_part}_mahwous_store" if en_part else ""
+
         return {
-            "description": str(data.get("description", "") or "").strip(),
-            "seo_description": str(data.get("seo_description", "") or "").strip(),
+            "brand_name": bn_final,
+            "description": desc,
+            "page_title": page_title,
+            "page_url": page_url,
+            "seo_description": seo_desc,
             "domain": dom,
         }
     except Exception:
@@ -4669,15 +4766,6 @@ if st.session_state.page == "pipeline":
                     unsafe_allow_html=True,
                 )
                 APP_LOG.warning("pipeline export validation: %s", pv_issues[:25])
-        seo_chk = st.session_state.pipe_seo_df
-        if seo_chk is not None and not seo_chk.empty:
-            sv_ok, sv_issues = validate_export_seo_dataframe(seo_chk)
-            if not sv_ok:
-                st.markdown(
-                    '<div class="al-warn">⚠️ تحقق ملف SEO:<br>'
-                    + "<br>".join(sv_issues[:12]) + "</div>",
-                    unsafe_allow_html=True,
-                )
         if new_brs:
             bv_ok, bv_issues = validate_export_brands_list(new_brs)
             if not bv_ok:
@@ -4706,14 +4794,7 @@ if st.session_state.page == "pipeline":
                     use_container_width=True, key="pipe_dl_xlsx"
                 )
         with ex3:
-            if st.session_state.pipe_seo_df is not None and not st.session_state.pipe_seo_df.empty:
-                st.download_button(
-                    "📥 ملف SEO — Excel",
-                    export_seo_xlsx(st.session_state.pipe_seo_df),
-                    f"seo_{date_str}.xlsx",
-                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    use_container_width=True, key="pipe_dl_seo"
-                )
+            pass
         with ex4:
             if new_brs:
                 st.download_button(
@@ -4791,28 +4872,7 @@ if st.session_state.page == "pipeline":
                         st.session_state.pipe_approved = dfw
                         st.rerun()
                 with t4:
-                    if st.button("🔍 توليد SEO لكل الصفوف", key="pipe_tab_seo", type="primary"):
-                        dfw = pdf2.copy()
-                        prog = st.progress(0)
-                        st.session_state._seo_batch_prog = prog
-                        full_seo, _gen = generate_seo_for_products_dataframe(dfw)
-                        st.session_state._seo_batch_prog = None
-                        st.session_state.pipe_seo_df = full_seo
-                        for idx, (ix, row) in enumerate(dfw.iterrows()):
-                            name = str(row.get("أسم المنتج", "")).strip()
-                            if not name:
-                                continue
-                            brand = match_brand(name)
-                            is_t = any(w in name.lower() for w in ["تستر", "tester"])
-                            size_m = re.search(r"\d+\s*(?:مل|ml)", name, re.I)
-                            size = size_m.group() if size_m else "100 مل"
-                            gender = ("للنساء" if any(w in name for w in ["نسائ", "women"]) else
-                                      "للرجال" if any(w in name for w in ["رجال", "men"]) else "للجنسين")
-                            seo_alt = gen_seo(name, brand, size, is_t, gender)
-                            dfw.at[ix, "وصف صورة المنتج"] = seo_alt["alt"]
-                            prog.progress(int((idx + 1) / max(len(dfw), 1) * 100))
-                        st.session_state.pipe_approved = dfw
-                        st.rerun()
+                    st.info("SEO لا يتم تصديره من مسار المقارنة. استخدم تبويب `SEO Processor` بعد إنشاء المنتجات في سلة ومنحها `No.`.")
 
         # معاينة الماركات الجديدة
         if new_brs:
@@ -4837,16 +4897,26 @@ if st.session_state.page == "pipeline":
                             prog.progress(int((i + 1) / max(len(w), 1) * 100))
                             continue
                         ai_b = _ai_enrich_brand_row_with_domain(bname, st.session_state.api_key)
+                        if ai_b.get("brand_name"):
+                            w.at[w.index[i], "اسم الماركة"] = ai_b["brand_name"]
                         if ai_b.get("description"):
                             w.at[w.index[i], "وصف مختصر عن الماركة"] = ai_b["description"]
                         if ai_b.get("seo_description"):
                             w.at[w.index[i], "(Page Description) وصف صفحة العلامة التجارية"] = ai_b["seo_description"]
                         dom = ai_b.get("domain", "")
                         w.at[w.index[i], "صورة شعار الماركة"] = f"https://logo.clearbit.com/{dom}" if dom else ""
-                        if not str(w.iloc[i].get("(Page Title) عنوان صفحة العلامة التجارية", "") or "").strip():
-                            w.at[w.index[i], "(Page Title) عنوان صفحة العلامة التجارية"] = f"عطور {bname} الأصلية | مهووس"
-                        if not str(w.iloc[i].get("(SEO Page URL) رابط صفحة العلامة التجارية", "") or "").strip():
-                            w.at[w.index[i], "(SEO Page URL) رابط صفحة العلامة التجارية"] = to_slug(bname)
+                        if ai_b.get("page_title"):
+                            w.at[w.index[i], "(Page Title) عنوان صفحة العلامة التجارية"] = ai_b["page_title"]
+                        else:
+                            w.at[w.index[i], "(Page Title) عنوان صفحة العلامة التجارية"] = w.iloc[i].get(
+                                "(Page Title) عنوان صفحة العلامة التجارية", ""
+                            )
+                        if ai_b.get("page_url"):
+                            w.at[w.index[i], "(SEO Page URL) رابط صفحة العلامة التجارية"] = ai_b["page_url"]
+                        else:
+                            w.at[w.index[i], "(SEO Page URL) رابط صفحة العلامة التجارية"] = w.iloc[i].get(
+                                "(SEO Page URL) رابط صفحة العلامة التجارية", to_slug(bname)
+                            )
                         prog.progress(int((i + 1) / max(len(w), 1) * 100))
                     st.session_state.pipe_missing_brands_df = w[SALLA_BRANDS_COLS].copy()
                     st.success("✅ اكتمل إثراء الماركات المفقودة.")
