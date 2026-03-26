@@ -249,7 +249,7 @@ div.stButton > button:hover { opacity: 0.88 !important; }
 SALLA_COLS = [
     "No.",
     "النوع ", "أسم المنتج", "تصنيف المنتج", "صورة المنتج",
-    "وصف صورة المنتج", "نوع المنتج", "سعر المنتج", "الوصف",
+    "وصف صورة المنتج", "نوع المنتج", "سعر المنتج", "الكمية المتوفرة", "الوصف",
     "هل يتطلب شحن؟", "رمز المنتج sku", "سعر التكلفة", "السعر المخفض",
     "تاريخ بداية التخفيض", "تاريخ نهاية التخفيض",
     "اقصي كمية لكل عميل", "إخفاء خيار تحديد الكمية",
@@ -1943,6 +1943,44 @@ def _strip_brand_name_edges(raw: object) -> str:
     return str(raw or "").strip().strip(' ,.-\'"')
 
 
+def _clean_brand_value_for_salla_output(raw: object) -> str:
+    """
+    تنظيف اسم الماركة قبل تصدير منتجات السلة:
+    - إزالة كلمات التوقف الشائعة مثل "تستر" و "عطر" (حتى لا تظهر في عمود الماركة وتسبب مشاكل).
+    - الحفاظ على صيغة "Arabic | English" إن كانت موجودة.
+    """
+    b = _strip_brand_name_edges(raw)
+    if not b:
+        return ""
+
+    ar_part = b
+    en_part = ""
+    if "|" in b:
+        ar_part, en_part = b.split("|", 1)
+        ar_part = ar_part.strip()
+        en_part = en_part.strip()
+
+    # إزالة stop-words من الجزء العربي فقط (الأهم لمنع "تستر"/"عطر" في الناتج)
+    # بدون الاعتماد على \b لأن حدود الكلمات العربية قد تفشل.
+    ar_part = re.sub(r"^(تستر|عطر|طقم|مجموعة)\s+", " ", ar_part, flags=re.IGNORECASE)
+    ar_part = re.sub(r"(?:\s|^)(تستر|عطر|طقم|مجموعة)(?:\s|$)", " ", ar_part, flags=re.IGNORECASE)
+    ar_part = re.sub(r"(?:^|\s)مزيل\s+عرق(?:\s|$)", " ", ar_part, flags=re.IGNORECASE)
+    ar_part = re.sub(r"\s+", " ", ar_part).strip()
+
+    if en_part:
+        en_part = re.sub(r"(?:^|\s)(tester|parfum|perfume)(?:\s|$)", " ", en_part, flags=re.IGNORECASE)
+        en_part = re.sub(r"\s+", " ", en_part).strip()
+
+    if en_part:
+        if not ar_part:
+            # إن انتهى الجزء العربي بعد التنظيف، نعيد الجزء العربي الأصلي بدون تغيير (لتفادي فقد الماركة).
+            ar_part = _strip_brand_name_edges(raw).split("|", 1)[0].strip() if "|" in _strip_brand_name_edges(raw) else _strip_brand_name_edges(raw)
+            ar_part = re.sub(r"^(تستر|عطر|طقم|مجموعة)\s+", "", ar_part, flags=re.IGNORECASE)
+            ar_part = re.sub(r"\s+", " ", ar_part).strip()
+        return f"{ar_part} | {en_part}".strip(" |")
+    return ar_part
+
+
 def clean_brand_name(brand_raw: str) -> str:
     """تنظيف الماركة من الكلمات الخاطئة والأطوال غير المنطقية"""
     if not brand_raw:
@@ -2573,6 +2611,7 @@ def build_empty_salla_row() -> dict:
     r["نوع المنتج"]               = "منتج جاهز"
     r["هل يتطلب شحن؟"]           = "نعم"
     r["خاضع للضريبة ؟"]          = "نعم"
+    r["الكمية المتوفرة"]          = "0"
     r["الوزن"]                    = "0.2"
     r["وحدة الوزن"]               = "kg"
     r["حالة المنتج"]              = "مرئي"
@@ -2597,7 +2636,7 @@ def fill_row(name, price="", sku="", image="", desc="",
     r["صورة المنتج"]     = str(image)
     r["وصف صورة المنتج"] = seo.get("alt", "")
     r["الوصف"]           = compact_html_desc(str(desc))
-    r["الماركة"]         = _strip_brand_name_edges(brand.get("name", ""))
+    r["الماركة"]         = _clean_brand_value_for_salla_output(brand.get("name", ""))
     r["تصنيف المنتج"]    = str(category)
     r["الوزن"]           = str(weight) if weight else "0.2"
     r["وحدة الوزن"]      = str(weight_unit) if weight_unit else "kg"
@@ -2626,6 +2665,20 @@ def _style_header_row(ws, row_num: int, cols: list,
 def export_product_xlsx(df: pd.DataFrame) -> bytes:
     if df is not None and not df.empty:
         df = dedupe_products_df(df.copy())
+        # Salla strict schema defaults (system columns + missing quantity col)
+        for col in SALLA_COLS:
+            if col not in df.columns:
+                df[col] = ""
+        if "الكمية المتوفرة" in df.columns:
+            df["الكمية المتوفرة"] = df["الكمية المتوفرة"].apply(
+                lambda x: "0" if not str(x or "").strip() or str(x).lower() in ("nan", "none") else str(x)
+            )
+        if "النوع " in df.columns:
+            df["النوع "] = "منتج"
+        if "نوع المنتج" in df.columns:
+            df["نوع المنتج"] = "منتج جاهز"
+        if "الماركة" in df.columns:
+            df["الماركة"] = df["الماركة"].apply(_clean_brand_value_for_salla_output)
     wb = Workbook()
     ws = wb.active
     ws.title = "Salla Products Template Sheet"
@@ -2674,6 +2727,20 @@ def export_product_xlsx(df: pd.DataFrame) -> bytes:
 def export_product_csv(df: pd.DataFrame) -> bytes:
     if df is not None and not df.empty:
         df = dedupe_products_df(df.copy())
+        # Salla strict schema defaults (system columns + missing quantity col)
+        for col in SALLA_COLS:
+            if col not in df.columns:
+                df[col] = ""
+        if "الكمية المتوفرة" in df.columns:
+            df["الكمية المتوفرة"] = df["الكمية المتوفرة"].apply(
+                lambda x: "0" if not str(x or "").strip() or str(x).lower() in ("nan", "none") else str(x)
+            )
+        if "النوع " in df.columns:
+            df["النوع "] = "منتج"
+        if "نوع المنتج" in df.columns:
+            df["نوع المنتج"] = "منتج جاهز"
+        if "الماركة" in df.columns:
+            df["الماركة"] = df["الماركة"].apply(_clean_brand_value_for_salla_output)
     out = io.StringIO()
     # Row 1
     out.write("بيانات المنتج" + "," * (len(SALLA_COLS) - 1) + "\n")
@@ -3440,7 +3507,10 @@ def render_compare_tab():
                     stt = str(rrow["الحالة"])
                     if stt == "جديد":
                         if idx in new_src.index:
-                            rows_out.append(new_src.loc[idx])
+                            row_ser = new_src.loc[idx].copy()
+                            if "الماركة" in rrow.index:
+                                row_ser["الماركة"] = rrow.get("الماركة", "")
+                            rows_out.append(row_ser)
                     elif stt == "مشبوه":
                         ap = st.session_state.cmp_approved.get(idx, True)
                         if ap and idx in new_src.index:
@@ -3448,6 +3518,8 @@ def render_compare_tab():
                             if idx in st.session_state.cmp_edit_name:
                                 if "أسم المنتج" in row_ser.index:
                                     row_ser["أسم المنتج"] = st.session_state.cmp_edit_name[idx]
+                            if "الماركة" in rrow.index:
+                                row_ser["الماركة"] = rrow.get("الماركة", "")
                             rows_out.append(row_ser)
                 if rows_out:
                     final_cmp = pd.DataFrame(rows_out)
@@ -3460,6 +3532,10 @@ def render_compare_tab():
                         final_cmp["النوع "] = "منتج"
                     if "نوع المنتج" in final_cmp.columns:
                         final_cmp["نوع المنتج"] = "منتج جاهز"
+                    if "الكمية المتوفرة" in final_cmp.columns:
+                        final_cmp["الكمية المتوفرة"] = "0"
+                    if "الماركة" in final_cmp.columns:
+                        final_cmp["الماركة"] = final_cmp["الماركة"].apply(_clean_brand_value_for_salla_output)
                     st.session_state.cmp_export_df = final_cmp
                     st.success(f"✅ {len(final_cmp)} منتج في القائمة النهائية")
                 else:
