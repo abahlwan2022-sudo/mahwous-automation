@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import re
+import sys
 import time
 import unicodedata
 from dataclasses import dataclass
@@ -366,6 +367,67 @@ def configure_app_logging() -> logging.Logger:
 
 APP_LOG = configure_app_logging()
 
+
+def _parse_json_object_from_llm_text(raw: str, *, context: str = "") -> dict:
+    """
+    يستخرج أول كائن JSON من ردّ النموذج (غالباً Claude) مع دعم أغلفة Markdown ```json ... ```.
+    يتعامل مع الأقواس المتداخلة عبر JSONDecoder؛ يجرّب عدة مواضع لـ «{» عند الفشل.
+    عند تعذّر التحليل: يُسجّل خطأ واضح (ملف + طرفية) ويعيد {} آمناً للواجهة.
+    """
+    empty: dict = {}
+    if raw is None:
+        APP_LOG.error("LLM JSON: raw is None (context=%s)", context)
+        print(f"[mahwous] LLM JSON: empty raw (context={context!r})", file=sys.stderr)
+        return empty
+    s = str(raw).strip()
+    if not s:
+        APP_LOG.error("LLM JSON: empty string (context=%s)", context)
+        print(f"[mahwous] LLM JSON: empty string (context={context!r})", file=sys.stderr)
+        return empty
+    if s.startswith("```"):
+        lines = s.split("\n")
+        if lines and lines[0].strip().startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        s = "\n".join(lines).strip()
+    dec = json.JSONDecoder()
+    positions = []
+    pos = 0
+    while len(positions) < 48:
+        i = s.find("{", pos)
+        if i < 0:
+            break
+        positions.append(i)
+        pos = i + 1
+    if not positions:
+        APP_LOG.error("LLM JSON: no '{' in response (context=%s) snippet=%r", context, s[:400])
+        print(f"[mahwous] LLM JSON: no '{{' (context={context!r})", file=sys.stderr)
+        return empty
+    last_err = None
+    for start in positions:
+        try:
+            obj, _end = dec.raw_decode(s, start)
+            if isinstance(obj, dict):
+                return obj
+            last_err = "root is not a JSON object"
+        except json.JSONDecodeError as e:
+            last_err = str(e)
+            continue
+    APP_LOG.error(
+        "LLM JSON: unparseable after %d brace position(s) (context=%s) last_err=%s snippet=%r",
+        len(positions),
+        context,
+        last_err,
+        s[:500],
+    )
+    print(
+        f"[mahwous] LLM JSON unparseable (context={context!r}): {last_err}",
+        file=sys.stderr,
+    )
+    return empty
+
+
 # ╔══════════════════════════════════════════════════════════════════╗
 # ║  AI SYSTEM PROMPT — خبير وصف منتجات مهووس v4.5                ║
 # ╚══════════════════════════════════════════════════════════════════╝
@@ -639,6 +701,17 @@ def normalize_price_digits(val) -> str:
         return m.group(1).replace(",", ".")
     digits = re.sub(r"[^\d.]", "", s)
     return digits or ""
+
+
+def sanitize_salla_price_for_export(val) -> str:
+    """إزالة عملات ورموز غير رقمية (SAR، ر.س، …) قبل تصدير سلة (Audit #20)."""
+    s = str(val or "").strip()
+    if not s or s.lower() in ("nan", "none"):
+        return ""
+    s = re.sub(r"(?i)\b(?:sar|sr|usd|eur|aed)\b", " ", s)
+    s = re.sub(r"(?:ريال|ر\.?\s*س)", " ", s, flags=re.IGNORECASE)
+    s = re.sub(r"[$€£¥]", "", s)
+    return normalize_price_digits(s)
 
 
 def compact_html_desc(html: str) -> str:
@@ -1821,8 +1894,8 @@ def ai_filter_suspects(suspects_df: pd.DataFrame, store_names: list,
         return pd.DataFrame(), suspects_df
 
     if not api_key or not HAS_ANTHROPIC:
-        # بدون AI: استبعد الكل
-        return pd.DataFrame(), suspects_df
+        # بدون AI: اعتمد الكل كـ «جديد» (لا تُسقِط المشبوه صامتاً)
+        return suspects_df, pd.DataFrame()
 
     try:
         client = anthropic.Anthropic(api_key=api_key)
@@ -1868,11 +1941,10 @@ def ai_filter_suspects(suspects_df: pd.DataFrame, store_names: list,
             messages=[{"role": "user", "content": prompt}]
         )
         raw = msg.content[0].text.strip()
-        m = re.search(r'\{.*\}', raw, re.DOTALL)
-        if not m:
+        data = _parse_json_object_from_llm_text(raw, context="ai_filter_suspects_batch")
+        if not data:
             return pd.DataFrame(), suspects_df
 
-        data = json.loads(m.group())
         decisions = {d["idx"]: d["decision"] for d in data.get("decisions", [])}
 
         approved_rows = []
@@ -1889,7 +1961,7 @@ def ai_filter_suspects(suspects_df: pd.DataFrame, store_names: list,
         return approved, rejected
 
     except Exception as e:
-        # عند أي خطأ: استبعد الكل بأمان
+        APP_LOG.exception("ai_filter_suspects failed: %s", e)
         return pd.DataFrame(), suspects_df
 
 
@@ -2054,10 +2126,8 @@ def generate_new_brand(brand_name: str) -> dict:
                 messages=[{"role": "user", "content": prompt}]
             )
             raw = msg.content[0].text.strip()
-            import json as _json
-            m = re.search(r'\{[\s\S]*\}', raw)
-            if m:
-                data = _json.loads(m.group())
+            data = _parse_json_object_from_llm_text(raw, context="generate_new_brand")
+            if data:
                 formatted_name = data.get("formatted_name", brand_name)
                 en_name        = data.get("en_name", brand_name)
                 desc           = data.get("desc", desc)
@@ -2179,10 +2249,8 @@ def ai_refine_seo_fields(
             messages=[{"role": "user", "content": prompt}],
         )
         raw = msg.content[0].text.strip()
-        m = re.search(r"\{[\s\S]*\}", raw)
-        if m:
-            import json as _json
-            d = _json.loads(m.group())
+        d = _parse_json_object_from_llm_text(raw, context="ai_refine_seo_fields")
+        if d:
             return {
                 "url": str(d.get("url_slug", base["url"])).strip() or base["url"],
                 "title": str(d.get("page_title", base["title"])).strip() or base["title"],
@@ -2467,11 +2535,9 @@ def extract_product_json_from_url(url: str, api_key: str) -> dict:
             messages=[{"role": "user", "content": prompt}],
         )
         raw = msg.content[0].text.strip()
-        m = re.search(r"\{[\s\S]*\}", raw)
-        if not m:
+        data = _parse_json_object_from_llm_text(raw, context="scrape_product_page_ai")
+        if not data:
             return empty
-        import json as _json
-        data = _json.loads(m.group())
         out = {**empty}
         for k in out.keys():
             if k in data and data[k] is not None:
@@ -2498,11 +2564,10 @@ def _ai_fetch_notes_only(name: str, brand_name: str, api_key: str) -> dict:
             temperature=0.1,
             messages=[{"role": "user", "content": prompt}],
         )
-        import json as _json
         raw = msg.content[0].text.strip()
-        m = re.search(r'\{[\s\S]*\}', raw)
-        if m:
-            return _json.loads(m.group())
+        parsed = _parse_json_object_from_llm_text(raw, context="ai_fetch_notes_only")
+        if parsed:
+            return parsed
     except Exception:
         pass
     return {"top": "غير متوفر", "heart": "غير متوفر", "base": "غير متوفر",
@@ -2752,10 +2817,9 @@ def _ai_enrich_product_row(raw_competitor_product_name: str, api_key: str) -> di
             messages=[{"role": "user", "content": prompt}],
         )
         raw = msg.content[0].text.strip()
-        m = re.search(r"\{[\s\S]*\}", raw)
-        if not m:
+        data = _parse_json_object_from_llm_text(raw, context="_ai_enrich_product_row")
+        if not data:
             return empty
-        data = json.loads(m.group())
 
         ai_type = str(data.get("type", "") or "").strip()
         if ai_type not in ["عطر", "تستر", "طقم", "مزيل عرق", "معطر شعر", "معطر جسم"]:
@@ -2880,23 +2944,41 @@ def _style_header_row(ws, row_num: int, cols: list,
     ws.row_dimensions[row_num].height = 30
 
 
+def get_latest_export_data() -> Optional[pd.DataFrame]:
+    """آخر جدول منتجات جاهز للتصدير من المسار الآلي (متزامن مع المحرر والإثراء)."""
+    if not hasattr(st, "session_state"):
+        return None
+    df = st.session_state.get("pipe_export_df")
+    if df is None:
+        df = st.session_state.get("pipe_approved")
+    return df
+
+
+def _prepare_salla_product_df_for_export(df: pd.DataFrame) -> pd.DataFrame:
+    """دمج أعمدة سلة، قيم افتراضية إلزامية، وتنظيف أسعار قبل CSV/XLSX."""
+    df = dedupe_products_df(df.copy())
+    for col in SALLA_COLS:
+        if col not in df.columns:
+            df[col] = ""
+    df = df.reindex(columns=list(SALLA_COLS))
+    df["النوع "] = "منتج"
+    df["نوع المنتج"] = "منتج جاهز"
+    df["حالة المنتج"] = "مرئي"
+    df["خاضع للضريبة ؟"] = "نعم"
+    df["الكمية المتوفرة"] = df["الكمية المتوفرة"].apply(
+        lambda x: "0" if not str(x or "").strip() or str(x).lower() in ("nan", "none") else str(x)
+    )
+    df["سعر المنتج"] = df["سعر المنتج"].apply(sanitize_salla_price_for_export)
+    df["السعر المخفض"] = df["السعر المخفض"].apply(sanitize_salla_price_for_export)
+    df["الماركة"] = df["الماركة"].apply(_clean_brand_value_for_salla_output)
+    return df
+
+
 def export_product_xlsx(df: pd.DataFrame) -> bytes:
-    if df is not None and not df.empty:
-        df = dedupe_products_df(df.copy())
-        # Salla strict schema defaults (system columns + missing quantity col)
-        for col in SALLA_COLS:
-            if col not in df.columns:
-                df[col] = ""
-        if "الكمية المتوفرة" in df.columns:
-            df["الكمية المتوفرة"] = df["الكمية المتوفرة"].apply(
-                lambda x: "0" if not str(x or "").strip() or str(x).lower() in ("nan", "none") else str(x)
-            )
-        if "النوع " in df.columns:
-            df["النوع "] = "منتج"
-        if "نوع المنتج" in df.columns:
-            df["نوع المنتج"] = "منتج جاهز"
-        if "الماركة" in df.columns:
-            df["الماركة"] = df["الماركة"].apply(_clean_brand_value_for_salla_output)
+    if df is None:
+        df = pd.DataFrame(columns=SALLA_COLS)
+    elif not df.empty:
+        df = _prepare_salla_product_df_for_export(df)
     wb = Workbook()
     ws = wb.active
     ws.title = "Salla Products Template Sheet"
@@ -2943,22 +3025,10 @@ def export_product_xlsx(df: pd.DataFrame) -> bytes:
 
 
 def export_product_csv(df: pd.DataFrame) -> bytes:
-    if df is not None and not df.empty:
-        df = dedupe_products_df(df.copy())
-        # Salla strict schema defaults (system columns + missing quantity col)
-        for col in SALLA_COLS:
-            if col not in df.columns:
-                df[col] = ""
-        if "الكمية المتوفرة" in df.columns:
-            df["الكمية المتوفرة"] = df["الكمية المتوفرة"].apply(
-                lambda x: "0" if not str(x or "").strip() or str(x).lower() in ("nan", "none") else str(x)
-            )
-        if "النوع " in df.columns:
-            df["النوع "] = "منتج"
-        if "نوع المنتج" in df.columns:
-            df["نوع المنتج"] = "منتج جاهز"
-        if "الماركة" in df.columns:
-            df["الماركة"] = df["الماركة"].apply(_clean_brand_value_for_salla_output)
+    if df is None:
+        df = pd.DataFrame(columns=SALLA_COLS)
+    elif not df.empty:
+        df = _prepare_salla_product_df_for_export(df)
     out = io.StringIO()
     # Row 1
     out.write("بيانات المنتج" + "," * (len(SALLA_COLS) - 1) + "\n")
@@ -2968,8 +3038,10 @@ def export_product_csv(df: pd.DataFrame) -> bytes:
         vals = []
         for c in SALLA_COLS:
             v = str(row.get(c, "") if pd.notna(row.get(c, "")) else "")
-            if any(x in v for x in [",", "\n", '"']):
-                v = f'"{v.replace(chr(34), chr(34)*2)}"'
+            if c == "الوصف":
+                v = '"' + v.replace('"', '""') + '"'
+            elif any(x in v for x in [",", "\n", '"']):
+                v = '"' + v.replace('"', '""') + '"'
             vals.append(v)
         out.write(",".join(vals) + "\n")
     return out.getvalue().encode("utf-8-sig")
@@ -3069,11 +3141,9 @@ def generate_seo_data_ai(product_name: str, missing_fields: list[str]) -> dict:
             messages=[{"role": "user", "content": prompt}],
         )
         raw = msg.content[0].text.strip()
-        m = re.search(r"\{[\s\S]*\}", raw)
-        if not m:
+        data = _parse_json_object_from_llm_text(raw, context="generate_seo_data_ai")
+        if not data:
             return empty_out
-        import json as _json
-        data = _json.loads(m.group())
         out = {}
         if "url_slug" in data:
             out["url_slug"] = str(data.get("url_slug", "")).strip()
@@ -3998,10 +4068,9 @@ def _ai_enrich_brand_row_with_domain(brand_name: str, api_key: str) -> dict:
             messages=[{"role": "user", "content": prompt}],
         )
         raw = msg.content[0].text.strip()
-        m = re.search(r"\{[\s\S]*\}", raw)
-        if not m:
+        data = _parse_json_object_from_llm_text(raw, context="_ai_enrich_brand_row_with_domain")
+        if not data:
             return empty
-        data = json.loads(m.group())
 
         brand_name_raw = str(data.get("brand_name", "") or "").strip()
         desc = str(data.get("description", "") or "").strip()
@@ -4423,6 +4492,7 @@ def render_store_audit_tab():
                             if st.button("🛠️ نقل للمسار الآلي لمراجعة إضافية", key="sa_audit_to_proc",
                                          width='stretch'):
                                 st.session_state.pipe_approved = st.session_state.audit_fixed_df
+                                st.session_state.pipe_export_df = st.session_state.audit_fixed_df.copy()
                                 st.session_state.pipe_step = 5
                                 st.session_state.pipe_results = None
                                 st.session_state.page = "pipeline"
@@ -4588,13 +4658,17 @@ if st.session_state.page == "pipeline":
     else:
         aok_pipe = bool(st.session_state.api_key)
         if not aok_pipe:
-            st.markdown('<div class="al-warn">⚠️ لم يُضبط مفتاح Claude API — المسار سيعمل بدون AI (المشبوه يُستبعد كله، الأوصاف تبقى فارغة)</div>',
-                        unsafe_allow_html=True)
+            st.markdown(
+                '<div class="al-warn">⚠️ لم يُضبط مفتاح Claude API — المسار يعمل بدون تحقق AI للمشبوه '
+                "(يُعامل كـ «جديد» لعدم فقدان البيانات)، والأوصاف التلقائية تبقى فارغة.</div>",
+                unsafe_allow_html=True,
+            )
 
         if st.button("🚀 بدء المسار الآلي الكامل", type="primary",
                      key="pipe_run", use_container_width=True):
             st.session_state.pipe_results    = None
             st.session_state.pipe_approved   = None
+            st.session_state.pipe_export_df  = None
             st.session_state.pipe_new_brands = []
             st.session_state.pipe_seo_df     = None
             st.session_state.pipe_store_dedup_dropped = 0
@@ -4769,9 +4843,9 @@ if st.session_state.page == "pipeline":
                 ai_approved = pd.DataFrame(verified_approved_rows) if verified_approved_rows else pd.DataFrame()
                 ai_rejected = pd.DataFrame(verified_rejected_rows) if verified_rejected_rows else pd.DataFrame()
             else:
-                # بدون AI: استبعد الكل
-                ai_approved = pd.DataFrame()
-                ai_rejected = suspects_p
+                # بدون AI: اعتمد كل المشبوه كمنتجات جديدة (لا تُسقَط من المسار الآلي)
+                ai_approved = suspects_p
+                ai_rejected = pd.DataFrame()
 
             # دمج المؤكد + ما اعتمده AI
             frames = [new_confirmed]
@@ -4981,6 +5055,11 @@ if st.session_state.page == "pipeline":
 
             # حفظ النتائج
             st.session_state.pipe_approved   = pd.DataFrame(final_rows) if final_rows else pd.DataFrame()
+            st.session_state.pipe_export_df  = (
+                st.session_state.pipe_approved.copy()
+                if final_rows
+                else pd.DataFrame()
+            )
             st.session_state.pipe_seo_df     = pd.DataFrame(seo_rows)   if seo_rows  else pd.DataFrame()
             st.session_state.pipe_new_brands = new_brands_found
             st.session_state.pipe_step       = 5
@@ -4995,6 +5074,10 @@ if st.session_state.page == "pipeline":
     # ════════════════════════════════════════════════════════════════
     if st.session_state.pipe_step >= 5 and st.session_state.pipe_approved is not None:
         approved_df  = st.session_state.pipe_approved
+        if st.session_state.get("pipe_export_df") is None:
+            st.session_state.pipe_export_df = (
+                approved_df.copy() if approved_df is not None else None
+            )
         raw_results  = st.session_state.pipe_results
         new_brs      = st.session_state.pipe_new_brands
 
@@ -5059,6 +5142,7 @@ if st.session_state.page == "pipeline":
             if "_تحديد_للإثراء" in pdf.columns:
                 pdf["_تحديد_للإثراء"] = pdf["_تحديد_للإثراء"].fillna(False).astype(bool)
             st.session_state.pipe_approved = pdf
+            st.session_state.pipe_export_df = pdf.copy()
 
             # ── بدء إثراء AI للمنتجات المحددة ────────────────────────────
             selected_idx = []
@@ -5100,13 +5184,14 @@ if st.session_state.page == "pipeline":
                     prog.progress(int((n + 1) / max(total, 1) * 100))
 
                 st.session_state.pipe_approved = pdf
+                st.session_state.pipe_export_df = pdf.copy()
                 st.success("✅ اكتمل إثراء AI للمنتجات المحددة.")
                 st.rerun()
 
         st.markdown("""<hr class="gdiv"><div class="sec-title"><div class="bar"></div>
         <h3>⬇️ التصدير النهائي</h3></div>""", unsafe_allow_html=True)
         date_str = datetime.now().strftime("%Y-%m-%d_%H-%M")
-        approved_df = st.session_state.pipe_approved
+        approved_df = get_latest_export_data()
 
         if approved_df is not None and not approved_df.empty:
             pv_ok, pv_issues = validate_export_product_dataframe(approved_df)
@@ -5131,7 +5216,7 @@ if st.session_state.page == "pipeline":
             if approved_df is not None and not approved_df.empty:
                 st.download_button(
                     "📥 منتج جديد.csv — التصدير الرئيسي",
-                    export_product_csv(approved_df),
+                    export_product_csv(get_latest_export_data()),
                     "منتج جديد.csv", "text/csv",
                     use_container_width=True, key="pipe_dl_csv_main"
                 )
@@ -5139,7 +5224,7 @@ if st.session_state.page == "pipeline":
             if approved_df is not None and not approved_df.empty:
                 st.download_button(
                     f"📥 منتج جديد — Excel ({len(approved_df):,})",
-                    export_product_xlsx(approved_df),
+                    export_product_xlsx(get_latest_export_data()),
                     f"منتج_جديد_{date_str}.xlsx",
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     use_container_width=True, key="pipe_dl_xlsx"
@@ -5189,6 +5274,7 @@ if st.session_state.page == "pipeline":
                                     name, is_t, brand, size, gender, "أو دو بارفيوم")
                                 prog.progress(int((n + 1) / max(len(idxs), 1) * 100))
                             st.session_state.pipe_approved = dfw
+                            st.session_state.pipe_export_df = dfw.copy()
                             st.success("✅ تم")
                             st.rerun()
                 with t2:
@@ -5206,6 +5292,7 @@ if st.session_state.page == "pipeline":
                                 dfw.at[dfw.index[i], "صورة المنتج"] = u
                             prog.progress(int((n + 1) / max(len(idxs), 1) * 100))
                         st.session_state.pipe_approved = dfw
+                        st.session_state.pipe_export_df = dfw.copy()
                         st.success("✅ تم")
                         st.rerun()
                 with t3:
@@ -5221,6 +5308,7 @@ if st.session_state.page == "pipeline":
                             if b.get("name"):
                                 dfw.at[dfw.index[i], "الماركة"] = b["name"]
                         st.session_state.pipe_approved = dfw
+                        st.session_state.pipe_export_df = dfw.copy()
                         st.rerun()
                 with t4:
                     st.info("SEO لا يتم تصديره من مسار المقارنة. استخدم تبويب `SEO Processor` بعد إنشاء المنتجات في سلة ومنحها `No.`.")
@@ -5296,6 +5384,7 @@ if st.session_state.page == "pipeline":
             st.session_state.pipe_comp_dfs   = []
             st.session_state.pipe_results    = None
             st.session_state.pipe_approved   = None
+            st.session_state.pipe_export_df  = None
             st.session_state.pipe_new_brands = []
             st.session_state.pipe_missing_brands_df = None
             st.session_state.pipe_seo_df     = None
@@ -5688,6 +5777,7 @@ elif st.session_state.page == "quickadd":
                 combined = pd.concat(
                     [ex, prod_df_qa], ignore_index=True) if ex is not None else prod_df_qa
                 st.session_state.pipe_approved = combined
+                st.session_state.pipe_export_df = combined.copy()
                 st.session_state.pipe_seo_df = seo_df_qa
                 st.session_state.pipe_step = 5
                 st.session_state.pipe_results = None
