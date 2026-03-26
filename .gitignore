@@ -1,5 +1,7 @@
 .env
 .env.local
+.env.*
+!.env.example
 *.pkl
 __pycache__/
 *.py[cod]
@@ -12,3 +14,9 @@ venv/
 .vscode/
 data/logs/
 *.log
+
+# مفاتيح / رموز وصول (لا تُرفع مع المستودع)
+*.pem
+*.key
+*_token.txt
+credentials.json
