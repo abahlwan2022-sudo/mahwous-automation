@@ -1561,12 +1561,6 @@ _DISCOUNT_TAIL_RE = re.compile(
     re.IGNORECASE,
 )
 
-_GENERIC_NAME_PREFIXES = frozenset({
-    "عطر", "تستر", "تيستر", "طقم", "مجموعة", "معطر", "بخاخ", "زيت",
-    "مزيل", "عرق", "لوشن", "كريم", "بودي", "شامبو", "بلسم", "مسكرة",
-    "حقيبة", "ميني", "عينة", "سمبل", "mini", "perfume", "tester", "set",
-})
-
 
 def strip_trailing_discount_label(text: str) -> str:
     """إزالة لاحقة خصم من نهاية الاسم (مثل « - 12% » أو « 15% »)."""
@@ -1598,41 +1592,6 @@ def is_discount_like_brand(s: str) -> bool:
     ):
         return True
     return False
-
-
-def _is_junk_brand_token(tok: str) -> bool:
-    if not tok or not str(tok).strip():
-        return True
-    x = tok.strip()
-    if x in {"-", "–", "—"}:
-        return True
-    if re.fullmatch(r"\d+(?:[.,]\d+)?%", x.replace("٪", "%"), re.IGNORECASE):
-        return True
-    return is_discount_like_brand(x)
-
-
-def _fallback_competitor_brand_display(new_name: str, prod: "_ProductRecord_v12") -> str:
-    """ماركة عرض احتياطية من الاسم دون خصومات أو كلمات عامة فقط."""
-    stripped = strip_trailing_discount_label(new_name or "")
-    for tok in stripped.split():
-        low = tok.lower()
-        if low in _GENERIC_NAME_PREFIXES or _is_junk_brand_token(tok):
-            continue
-        c = clean_brand_name(tok)
-        if c:
-            return c
-        if len(tok) >= 3 and not is_discount_like_brand(tok):
-            return tok.strip()
-    for tok in (prod.core_name or "").split():
-        low = tok.lower()
-        if low in _GENERIC_NAME_PREFIXES or _is_junk_brand_token(tok):
-            continue
-        c = clean_brand_name(tok)
-        if c:
-            return c
-        if len(tok) >= 3 and not is_discount_like_brand(tok):
-            return tok.strip()
-    return ""
 
 
 def _extract_core_name_v12(raw_name: str, brand: str = "") -> str:
@@ -1906,11 +1865,7 @@ def run_smart_comparison(new_df: pd.DataFrame, store_df: pd.DataFrame,
 
         # تطابق SKU مباشر
         if new_sku and new_sku.lower() in store_sku_set:
-            _sku_prod = _ProductRecord_v12(raw_name=new_name, brand=competitor_brand or "")
-            _sku_brand = (
-                clean_brand_name(competitor_brand or "")
-                or _fallback_competitor_brand_display(new_name, _sku_prod)
-            )
+            _sku_brand = clean_brand_name(competitor_brand or "")
             results.append({
                 "الاسم الجديد": new_name, "SKU الجديد": new_sku,
                 "الماركة": _sku_brand or "",
@@ -1950,11 +1905,7 @@ def run_smart_comparison(new_df: pd.DataFrame, store_df: pd.DataFrame,
         ptype_ar = ptype_map.get(prod.product_type, "عطر تجاري")
         cat = _CATEGORY_MAP_V12.get(prod.product_type, "العطور")
         _cb_disp = clean_brand_name(competitor_brand or "")
-        brand_display = (
-            _cb_disp
-            or (prod.brand_normalized or "")
-            or _fallback_competitor_brand_display(new_name, prod)
-        )
+        brand_display = _cb_disp or (prod.brand_normalized or "")
 
         results.append({
             "الاسم الجديد":           new_name,
@@ -2269,23 +2220,14 @@ def match_category(name: str, gender: str = "") -> str:
 
 
 def to_slug(text: str) -> str:
-    ar = {
-        "ا": "a", "أ": "a", "إ": "e", "آ": "a", "ب": "b", "ت": "t",
-        "ث": "th", "ج": "j", "ح": "h", "خ": "kh", "د": "d", "ذ": "z",
-        "ر": "r", "ز": "z", "س": "s", "ش": "sh", "ص": "s", "ض": "d",
-        "ط": "t", "ظ": "z", "ع": "a", "غ": "gh", "ف": "f", "ق": "q",
-        "ك": "k", "ل": "l", "م": "m", "ن": "n", "ه": "h", "و": "w",
-        "ي": "y", "ى": "a", "ة": "a", "ء": "", "ئ": "y", "ؤ": "w",
-    }
+    """مسار URL لاتيني: أحرف إنجليزية وأرقام فقط — بدون تحويل صوتي للعربية."""
     out = ""
     for c in str(text).lower():
-        if c in ar:
-            out += ar[c]
-        elif c.isascii() and c.isalnum():
+        if c.isascii() and c.isalnum():
             out += c
         elif c in " -_":
             out += "-"
-    return re.sub(r"-+", "-", out).strip("-") or "perfume"
+    return re.sub(r"-+", "-", out).strip("-")
 
 
 def _append_sku_to_seo_slug(url: str, sku_suffix: str) -> str:
@@ -5299,12 +5241,6 @@ if st.session_state.page == "pipeline":
                 if str(nm).strip():
                     known_brand_names.add(normalize_brand_name_v2(nm))
 
-            conc_map_ar = {
-                "EDP": "أو دو بارفيوم", "EDT": "أو دو تواليت",
-                "EDC": "أو دو كولون", "PARFUM": "بارفيوم",
-                "HAIR_MIST": "Hair Mist", "MIST": "Body Mist", "UNKNOWN": "أو دو بارفيوم",
-            }
-
             approved_rows = list(approved_all.iterrows())
             total_ap = len(approved_rows)
             BATCH_PIPE = 10
@@ -5329,7 +5265,7 @@ if st.session_state.page == "pipeline":
                         f'<span style="color:#b8933a;font-weight:700">{pname[:72]}</span>'
                         f'{"…" if len(pname) > 72 else ""}</div>'
                         f'<div style="font-size:0.76rem;color:#7a6e60;margin-top:4px">'
-                        f'المنتج {pi_idx + 1} من {total_ap} — يشمل جلب صورة (Google) وتوليد وصف (Claude) عند توفر المفاتيح؛ '
+                        f'المنتج {pi_idx + 1} من {total_ap} — إثراء المنتج عبر Claude وجلب صورة Google عند توفر المفاتيح؛ '
                         f'كل استدعاء شبكة يضيف ثوانٍ.</div>',
                         unsafe_allow_html=True,
                     )
@@ -5343,6 +5279,16 @@ if st.session_state.page == "pipeline":
                             pimg = ""
                     pprice = prow.get("سعر المنافس", "")
 
+                    _pipe_ai_k = _effective_anthropic_api_key()
+                    ai_out = {}
+                    if _pipe_ai_k and HAS_ANTHROPIC:
+                        ai_out = _ai_enrich_product_row(pname, _pipe_ai_k) or {}
+                    if ai_out:
+                        pname = ai_out.get("formatted_name") or pname
+                        desc = ai_out.get("html_description") or ""
+                    else:
+                        desc = ""
+
                     attrs  = extract_product_attrs(pname)
                     size_s = attrs.get("size") or 0
                     if not size_s:
@@ -5350,8 +5296,6 @@ if st.session_state.page == "pipeline":
                     else:
                         size = f"{int(size_s) if size_s == int(size_s) else size_s} مل"
                     size = _normalize_product_size_ml(size) or size
-                    conc   = attrs.get("concentration") or "EDP"
-                    conc_ar = conc_map_ar.get(conc, conc if conc != "غير محدد" else "أو دو بارفيوم")
                     is_t   = "تستر" in attrs.get("type", "")
                     gender_kw = "للجنسين"
                     nl = pname.lower()
@@ -5360,6 +5304,8 @@ if st.session_state.page == "pipeline":
 
                     brand_d    = match_brand(pname)
                     prow_brand = clean_brand_name(str(prow.get("الماركة","") or ""))
+                    if ai_out.get("brand"):
+                        prow_brand = str(ai_out["brand"]).strip() or prow_brand
 
                     if not brand_d.get("name") and prow_brand:
                         brand_d = match_brand(prow_brand)
@@ -5367,7 +5313,7 @@ if st.session_state.page == "pipeline":
                     is_new_generated = False
 
                     if not brand_d.get("name") and not prow_brand:
-                        api_k = st.session_state.get("api_key")
+                        api_k = st.session_state.get("api_key") or _effective_anthropic_api_key()
                         if api_k and HAS_ANTHROPIC:
                             ext = _extract_brand_entity_with_ai(pname, api_k)
                             if ext and ext != "Unknown":
@@ -5414,7 +5360,6 @@ if st.session_state.page == "pipeline":
                                 )
                             known_brand_names.add(bn_key)
 
-                    pname  = standardize_product_name(pname, brand_d.get("name", ""))
                     cat    = match_category(pname, gender_kw)
 
                     pi_idx += 1
@@ -5428,13 +5373,6 @@ if st.session_state.page == "pipeline":
 
                     if not str(pimg).strip():
                         pimg = fetch_image(pname, is_t)
-
-                    desc = ""
-                    if aok_pipe:
-                        try:
-                            desc = ai_generate(pname, is_t, brand_d, str(size), gender_kw, conc_ar)
-                        except Exception:
-                            desc = ""
 
                     r = fill_row(
                         name=pname, price=str(pprice), sku="",
