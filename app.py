@@ -2259,6 +2259,17 @@ for b in st.session_state.new_brands:
         b["(Page Description) وصف صفحة العلامة التجارية"] = f"تسوّق أحدث عطور {bn} الأصلية. تشكيلة فاخرة تناسب ذوقك بأسعار حصرية من متجر مهووس."
 
 
+def _enforce_salla_product_seo_limits(title: str, desc: str) -> tuple[str, str]:
+    """حدود سلة: عنوان الصفحة 60 حرفاً، الوصف 160 حرفاً."""
+    t = str(title or "")
+    d = str(desc or "")
+    if len(t) > 60:
+        t = t[:60]
+    if len(d) > 160:
+        d = d[:160]
+    return t, d
+
+
 def gen_seo(
     name: str,
     brand: dict,
@@ -2278,10 +2289,9 @@ def gen_seo(
         title = f"تستر {title}".strip()
     desc  = (f"تسوق {pref} {name} {size} الأصلي من {bname}. "
              f"عطر {gender} فاخر ثابت. أصلي 100% من مهووس.")
-    if len(desc) > 160:
-        desc = desc[:157] + "..."
     slug = to_slug(f"{ben}-{name}-{size}".replace("مل", "ml"))
     slug = _append_sku_to_seo_slug(slug, sku_suffix)
+    title, desc = _enforce_salla_product_seo_limits(title, desc)
     return {
         "url":   slug,
         "title": title,
@@ -2310,6 +2320,8 @@ def ai_refine_seo_fields(
         out = dict(base)
         if sku_suffix:
             out["url"] = _append_sku_to_seo_slug(out.get("url", ""), sku_suffix)
+        t2, d2 = _enforce_salla_product_seo_limits(out.get("title", ""), out.get("desc", ""))
+        out["title"], out["desc"] = t2, d2
         return out
     try:
         client = anthropic.Anthropic(api_key=key)
@@ -2324,7 +2336,7 @@ def ai_refine_seo_fields(
             f"meta_description={base['desc']}\n\n"
             "أعد JSON فقط بدون أي نص خارج JSON:\n"
             '{"url_slug":"...","page_title":"...","meta_description":"..."}\n'
-            "قواعد: meta_description حتى 160 حرفًا عربية فاخرة، page_title حتى 65 حرفًا، "
+            "قواعد: meta_description حتى 160 حرفًا عربية فاخرة، page_title حتى 60 حرفًا، "
             "url_slug لاتيني صغير بشرطات فقط بدون مسافات."
         )
         msg = anthropic_messages_create(
@@ -2336,7 +2348,7 @@ def ai_refine_seo_fields(
         raw = msg.content[0].text.strip()
         d = _parse_json_object_from_llm_text(raw, context="ai_refine_seo_fields")
         if d:
-            return {
+            out = {
                 "url": _append_sku_to_seo_slug(
                     str(d.get("url_slug", base["url"])).strip() or base["url"],
                     sku_suffix,
@@ -2345,11 +2357,16 @@ def ai_refine_seo_fields(
                 "desc": str(d.get("meta_description", base["desc"])).strip() or base["desc"],
                 "alt": base.get("alt", ""),
             }
+            t2, d2 = _enforce_salla_product_seo_limits(out["title"], out["desc"])
+            out["title"], out["desc"] = t2, d2
+            return out
     except Exception:
         pass
     out = dict(base)
     if sku_suffix:
         out["url"] = _append_sku_to_seo_slug(out.get("url", ""), sku_suffix)
+    t2, d2 = _enforce_salla_product_seo_limits(out.get("title", ""), out.get("desc", ""))
+    out["title"], out["desc"] = t2, d2
     return out
 
 
@@ -3217,6 +3234,28 @@ def _prepare_salla_product_df_for_export(df: pd.DataFrame) -> pd.DataFrame:
     )
     df["سعر المنتج"] = df["سعر المنتج"].apply(sanitize_salla_price_for_export)
     df["السعر المخفض"] = df["السعر المخفض"].apply(sanitize_salla_price_for_export)
+
+    def _fix_sale_price_vs_regular(row: pd.Series) -> str:
+        disc_s = str(row.get("السعر المخفض", "") or "").strip()
+        if not disc_s or disc_s.lower() in ("nan", "none"):
+            return ""
+        ok_r, p_reg = parse_price_numeric(row.get("سعر المنتج", ""))
+        ok_d, p_disc = parse_price_numeric(row.get("السعر المخفض", ""))
+        if ok_r and ok_d and p_disc >= p_reg:
+            return ""
+        return disc_s
+
+    df["السعر المخفض"] = df.apply(_fix_sale_price_vs_regular, axis=1)
+
+    def _first_product_image_url(v) -> str:
+        s = str(v or "").strip()
+        if not s or s.lower() in ("nan", "none"):
+            return ""
+        if "," in s:
+            return s.split(",")[0].strip()
+        return s
+
+    df["صورة المنتج"] = df["صورة المنتج"].apply(_first_product_image_url)
     df["الماركة"] = df["الماركة"].apply(_clean_brand_value_for_salla_output)
     # SKU: بادئة V- لتقليل التصادم مع رموز المتجر (#33)
     if "رمز المنتج sku" in df.columns:
@@ -3362,7 +3401,25 @@ def export_product_csv(df: pd.DataFrame) -> bytes:
     return out.getvalue().encode("utf-8-sig")
 
 
+def _prepare_salla_seo_df_for_export(df: pd.DataFrame) -> pd.DataFrame:
+    """قص حقول SEO لحدود سلة قبل التصدير."""
+    df = df.copy()
+    tc = "عنوان صفحة المنتج (SEO Page Title)"
+    dc = "وصف صفحة المنتج (SEO Page Description)"
+    if tc in df.columns:
+        df[tc] = df[tc].apply(
+            lambda x: (str(x) if pd.notna(x) else "")[:60]
+        )
+    if dc in df.columns:
+        df[dc] = df[dc].apply(
+            lambda x: (str(x) if pd.notna(x) else "")[:160]
+        )
+    return df
+
+
 def export_seo_xlsx(df: pd.DataFrame) -> bytes:
+    if df is not None and not df.empty:
+        df = _prepare_salla_seo_df_for_export(df)
     wb = Workbook()
     ws = wb.active
     ws.title = "Salla Product Seo Sheet"
@@ -3387,6 +3444,8 @@ def export_seo_xlsx(df: pd.DataFrame) -> bytes:
 
 
 def export_seo_csv(df: pd.DataFrame) -> bytes:
+    if df is not None and not df.empty:
+        df = _prepare_salla_seo_df_for_export(df)
     out = io.StringIO()
     out.write(",".join(SALLA_SEO_COLS) + "\n")
     for _, row in df.iterrows():
@@ -3467,6 +3526,14 @@ def generate_seo_data_ai(product_name: str, missing_fields: list[str]) -> dict:
             out["page_title"] = str(data.get("page_title", "")).strip()
         if "meta_description" in data:
             out["meta_description"] = str(data.get("meta_description", "")).strip()
+        if out:
+            t_lim, d_lim = _enforce_salla_product_seo_limits(
+                out.get("page_title", ""), out.get("meta_description", "")
+            )
+            if "page_title" in out:
+                out["page_title"] = t_lim
+            if "meta_description" in out:
+                out["meta_description"] = d_lim
         return out
     except Exception:
         try:
