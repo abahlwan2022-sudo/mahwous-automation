@@ -2786,6 +2786,41 @@ def _strip_junk_phrases_from_clean_name(s: str) -> str:
     return t
 
 
+def _clean_pname_for_fallback(pname: str) -> str:
+    """تنظيف اسم المنتج للوصف الاحتياطي عند فشل أو فراغ مخرجات Claude."""
+    orig = str(pname or "").strip()
+    if not orig:
+        return orig
+    t = _strip_junk_phrases_from_clean_name(orig)
+    for phrase in ("(بدون غطاء)", "(بدون كرتون)", "(بدون علبة)", "(بدون غطا)"):
+        t = t.replace(phrase, " ")
+    t = re.sub(r"\b(?:تستر|تيستر|tester)\b", " ", t, flags=re.IGNORECASE)
+    t = re.sub(r"\s+", " ", t).strip()
+    return t or orig
+
+
+def _generate_fallback_html(raw_name: str, brand: str) -> str:
+    """قالب HTML احتياطي متوافق مع سلة — لا يُرجع وصفاً فارغاً عند فشل API."""
+    rn = str(raw_name or "").strip() or "منتج عطور"
+    br = str(brand or "").strip() or "غير محدد"
+    site_root = MAHWOUS_SITE_BASE.rstrip("/")
+    return "\n".join(
+        [
+            f"<h2>{rn}</h2>",
+            f"<p>نقدّم لك <strong>{rn}</strong> من دار <strong>{br}</strong> — "
+            "منتج أصلي مختار بعناية من متجر مهووس، مع شحن سريع وخدمة موثوقة داخل السعودية.</p>",
+            "<h3>تفاصيل المنتج</h3>",
+            "<ul>",
+            f"<li><strong>الماركة:</strong> {br}</li>",
+            f"<li><strong>الاسم:</strong> {rn}</li>",
+            "</ul>",
+            "<h3>لماذا تختار مهووس؟</h3>",
+            "<p>نوفر لك عطوراً أصلية مع ضمان الجودة وتجربة شراء سلسة تناسب تطلعاتك.</p>",
+            f'<p><a href="{site_root}/" target="_blank" rel="noopener">https://mahwous.com/</a></p>',
+        ]
+    )
+
+
 def _strip_brand_tokens_from_clean_name(clean_name: str, brand_clean: str) -> str:
     """يزيل تكرار أجزاء الماركة العربية/الإنجليزية من اسم الرائحة (تدقيق #29)."""
     cn = str(clean_name or "").strip()
@@ -5243,15 +5278,22 @@ if st.session_state.page == "pipeline":
 
             approved_rows = list(approved_all.iterrows())
             total_ap = len(approved_rows)
-            BATCH_PIPE = 10
+            CHUNK_SIZE = 10
+            total_chunks = (total_ap + CHUNK_SIZE - 1) // CHUNK_SIZE if total_ap else 0
             pi_idx = 0
+            fallback_count = 0
+            _pipe_ai_k = _effective_anthropic_api_key()
 
-            for batch_start in range(0, total_ap, BATCH_PIPE):
-                batch_slice = approved_rows[batch_start:batch_start + BATCH_PIPE]
+            for chunk_idx, batch_start in enumerate(range(0, total_ap, CHUNK_SIZE)):
+                batch_slice = approved_rows[batch_start:batch_start + CHUNK_SIZE]
+                st.info(
+                    f"⏳ جاري معالجة الدفعة {chunk_idx + 1} من {total_chunks}..."
+                )
                 status_ph.markdown(
-                    f'<div class="prog-run">🛠️ معالجة الدفعة {batch_start // BATCH_PIPE + 1} '
+                    f'<div class="prog-run">🛠️ معالجة الدفعة {chunk_idx + 1} '
                     f'({len(batch_slice)} منتج)...</div>',
-                    unsafe_allow_html=True)
+                    unsafe_allow_html=True,
+                )
                 for _, prow in batch_slice:
                     prog_bar.progress(
                         55 + int((pi_idx + 1) / max(total_ap, 1) * 34))
@@ -5260,7 +5302,7 @@ if st.session_state.page == "pipeline":
                     if not pname.strip():
                         continue
                     status_ph.markdown(
-                        f'<div class="prog-run">🛠️ معالجة الدفعة {batch_start // BATCH_PIPE + 1} '
+                        f'<div class="prog-run">🛠️ معالجة الدفعة {chunk_idx + 1} '
                         f'({len(batch_slice)} منتج) — جاري: '
                         f'<span style="color:#b8933a;font-weight:700">{pname[:72]}</span>'
                         f'{"…" if len(pname) > 72 else ""}</div>'
@@ -5279,15 +5321,31 @@ if st.session_state.page == "pipeline":
                             pimg = ""
                     pprice = prow.get("سعر المنافس", "")
 
-                    _pipe_ai_k = _effective_anthropic_api_key()
                     ai_out = {}
                     if _pipe_ai_k and HAS_ANTHROPIC:
                         ai_out = _ai_enrich_product_row(pname, _pipe_ai_k) or {}
+                        time.sleep(1.5)
                     if ai_out:
                         pname = ai_out.get("formatted_name") or pname
                         desc = ai_out.get("html_description") or ""
                     else:
                         desc = ""
+
+                    row_br_raw = clean_brand_name(str(prow.get("الماركة", "") or ""))
+                    _nk_fb = (
+                        normalize_brand_name_v2(row_br_raw)
+                        if str(row_br_raw).strip()
+                        else ""
+                    )
+                    prow_brand_fb = (
+                        str(row_br_raw).strip()
+                        if (_nk_fb and _nk_fb in known_brand_names)
+                        else "غير محدد"
+                    )
+                    clean_pname = _clean_pname_for_fallback(pname)
+                    if (not ai_out) or (not str(desc or "").strip()):
+                        desc = _generate_fallback_html(clean_pname, prow_brand_fb)
+                        fallback_count += 1
 
                     attrs  = extract_product_attrs(pname)
                     size_s = attrs.get("size") or 0
@@ -5390,6 +5448,13 @@ if st.session_state.page == "pipeline":
                     })
 
                 prog_bar.progress(55 + int(min(pi_idx, total_ap) / max(total_ap, 1) * 34))
+                if _pipe_ai_k and HAS_ANTHROPIC:
+                    time.sleep(6)
+
+            if fallback_count > 0:
+                st.warning(
+                    f"تم استخدام الوصف الذكي البديل لـ {fallback_count} منتج بسبب ضغط سيرفرات الذكاء الاصطناعي."
+                )
 
             prog_bar.progress(90)
 
