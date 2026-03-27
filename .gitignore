@@ -1,0 +1,22 @@
+.env
+.env.local
+.env.*
+!.env.example
+*.pkl
+__pycache__/
+*.py[cod]
+.Python
+.venv/
+venv/
+.streamlit/secrets.toml
+.pytest_cache/
+.idea/
+.vscode/
+data/logs/
+*.log
+
+# مفاتيح / رموز وصول (لا تُرفع مع المستودع)
+*.pem
+*.key
+*_token.txt
+credentials.json

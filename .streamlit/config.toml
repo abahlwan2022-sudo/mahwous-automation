@@ -10,7 +10,5 @@ maxUploadSize    = 200
 enableCORS       = false
 enableXsrfProtection = false
 headless         = true
-
 [browser]
 gatherUsageStats = false
-serverAddress    = "0.0.0.0"
