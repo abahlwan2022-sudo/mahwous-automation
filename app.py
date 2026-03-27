@@ -3241,15 +3241,6 @@ def _prepare_salla_product_df_for_export(df: pd.DataFrame) -> pd.DataFrame:
 
     df["السعر المخفض"] = df.apply(_fix_sale_price_vs_regular, axis=1)
 
-    def _first_product_image_url(v) -> str:
-        s = str(v or "").strip()
-        if not s or s.lower() in ("nan", "none"):
-            return ""
-        if "," in s:
-            return s.split(",")[0].strip()
-        return s
-
-    df["صورة المنتج"] = df["صورة المنتج"].apply(_first_product_image_url)
     df["الماركة"] = df["الماركة"].apply(_clean_brand_value_for_salla_output)
     if "رمز المنتج sku" in df.columns:
         df["رمز المنتج sku"] = df.apply(
@@ -3272,6 +3263,11 @@ def _prepare_salla_product_df_for_export(df: pd.DataFrame) -> pd.DataFrame:
     if "أسم المنتج" in df.columns:
         df["تصنيف المنتج"] = df["أسم المنتج"].apply(
             lambda n: match_category(str(n), "")
+        )
+    # توافق متجر سلة الحالي: استبدال التصنيف غير الموجود "العطور > عطور للجنسين" بالتصنيف العام "العطور"
+    if "تصنيف المنتج" in df.columns:
+        df["تصنيف المنتج"] = df["تصنيف المنتج"].astype(str).apply(
+            lambda v: "العطور" if "العطور > عطور للجنسين" in v else v
         )
 
     def _export_cost_row(row) -> str:
@@ -3314,6 +3310,21 @@ def _prepare_salla_product_df_for_export(df: pd.DataFrame) -> pd.DataFrame:
 
     df["تاريخ بداية التخفيض"] = df["تاريخ بداية التخفيض"].apply(_disc_date)
     df["تاريخ نهاية التخفيض"] = df["تاريخ نهاية التخفيض"].apply(_disc_date)
+    # سلة ترفض محارف خاصة في alt الصورة (مثل + - % ...)؛ نسمح فقط عربي/إنجليزي/أرقام/مسافات
+    if "وصف صورة المنتج" in df.columns:
+        df["وصف صورة المنتج"] = (
+            df["وصف صورة المنتج"]
+            .astype(str)
+            .str.replace(r"[^\w\s\u0600-\u06FF]", "", regex=True)
+            .str.strip()
+        )
+    # سلة تتوقع هذه الحقول فارغة وليست "0" في قالب الاستيراد الجديد
+    if "اقصي كمية لكل عميل" in df.columns:
+        df["اقصي كمية لكل عميل"] = ""
+    if "إخفاء خيار تحديد الكمية" in df.columns:
+        df["إخفاء خيار تحديد الكمية"] = ""
+    if "اضافة صورة عند الطلب" in df.columns:
+        df["اضافة صورة عند الطلب"] = ""
     return df
 
 
@@ -5269,27 +5280,44 @@ if st.session_state.page == "pipeline":
                 verified_rejected_rows = []
                 cache = {}  # (competitor, store) -> YES/NO
                 prog_ai = st.progress(0, text="🔍 جاري التحقق العميق بالذكاء الاصطناعي للمنتجات المشتبه بها...")
-                for j, (orig_idx, srow) in enumerate(suspects_p.iterrows()):
-                    if j % 1 == 0:
-                        prog_ai.progress(int((j + 1) / max(len(suspects_p), 1) * 100))
-                    comp_nm = str(srow.get("الاسم الجديد", "") or "").strip()
-                    closest_nm = str(srow.get("أقرب تطابق في المتجر", "") or "").strip()
-                    if not comp_nm or not closest_nm:
-                        # بدون اسم متجر كافٍ: افتراض NO لحفظ البيانات
-                        verified_approved_rows.append(srow)
-                        continue
-                    key = (comp_nm, closest_nm)
-                    if key in cache:
-                        verdict = cache[key]
-                    else:
-                        verdict = _resolve_suspicious_with_ai(comp_nm, closest_nm)
-                        cache[key] = verdict
+                suspect_rows = list(suspects_p.iterrows())
+                suspect_total = len(suspect_rows)
+                SUSPICIOUS_CHUNK_SIZE = 10
+                total_chunks = (
+                    (suspect_total + SUSPICIOUS_CHUNK_SIZE - 1) // SUSPICIOUS_CHUNK_SIZE
+                    if suspect_total
+                    else 0
+                )
+                processed = 0
+                for chunk_idx, chunk_start in enumerate(range(0, suspect_total, SUSPICIOUS_CHUNK_SIZE)):
+                    st.info(
+                        f"⏳ يراجع الذكاء الاصطناعي المشبوهين: الدفعة {chunk_idx + 1} من {total_chunks}..."
+                    )
+                    chunk_rows = suspect_rows[chunk_start:chunk_start + SUSPICIOUS_CHUNK_SIZE]
+                    for _, srow in chunk_rows:
+                        processed += 1
+                        prog_ai.progress(int(processed / max(suspect_total, 1) * 100))
+                        comp_nm = str(srow.get("الاسم الجديد", "") or "").strip()
+                        closest_nm = str(srow.get("أقرب تطابق في المتجر", "") or "").strip()
+                        if not comp_nm or not closest_nm:
+                            # بدون اسم متجر كافٍ: افتراض NEW لحفظ البيانات
+                            verified_approved_rows.append(srow)
+                            continue
+                        key = (comp_nm, closest_nm)
+                        if key in cache:
+                            verdict = cache[key]
+                        else:
+                            verdict = _resolve_suspicious_with_ai(comp_nm, closest_nm)
+                            cache[key] = verdict
+                            time.sleep(1.5)
 
-                    # Golden rule: عند أي خطأ/غموض (""), افترض أنه جديد (NO) لحفظ البيانات
-                    if verdict == "YES":
-                        verified_rejected_rows.append(srow)
-                    else:
-                        verified_approved_rows.append(srow)
+                        # Bulletproof fallback:
+                        # أي فشل/فراغ/غموض من الذكاء = NEW (لا نخسر بيانات المنافس)
+                        if verdict == "YES":
+                            verified_rejected_rows.append(srow)
+                        else:
+                            verified_approved_rows.append(srow)
+                    time.sleep(5)
 
                 prog_ai.progress(100, text="✅ اكتمل التحقق العميق")
                 ai_approved = pd.DataFrame(verified_approved_rows) if verified_approved_rows else pd.DataFrame()
