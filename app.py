@@ -3716,7 +3716,7 @@ with st.sidebar:
     PAGES = [
         ("🚀", "المسار الآلي",           "pipeline"),
         ("🔀", "المقارنة",              "compare"),
-        ("🕸️", "Web Scraping",          "web_scraping"),
+        ("🤖", "كشط وسحب المنتجات",     "web_scraping"),
         ("🏪", "مدقق ملف المتجر",       "store_audit"),
         ("🔍", "معالج الـ SEO",          "seo_processor"),
         ("➕", "منتج سريع",              "quickadd"),
@@ -3818,7 +3818,7 @@ TITLES = {
     "pipeline":      ("🚀 المسار الآلي",            "مقارنة → فلترة AI → معالجة → جدول تفاعلي → تصدير منتج جديد.csv"),
     "seo_processor": ("🔍 معالج الـ SEO",           "توليد روابط وعناوين وأوصاف SEO بتنسيق سلة — ذكاء اصطناعي"),
     "compare":       ("🔀 المقارنة",                "مقارنة المنافسين مع المتجر واعتماد النتائج بصرياً"),
-    "web_scraping":  ("🕸️ Web Scraping",            "سحب منتجات المنافسين ثم تصدير المنتجات الجديدة بتنسيق سلة"),
+    "web_scraping":  ("🤖 كشط وسحب المنتجات",       "سحب منتجات المنافسين ثم تصدير المنتجات الجديدة بتنسيق سلة"),
     "store_audit":   ("🏪 مدقق ملف المتجر",         "فحص ملف المتجر — اكتشاف النواقص — إصلاح وتصدير بتنسيق سلة"),
     "quickadd":      ("➕ منتج سريع",              "أدخل رابط منتج أو ارفع صورة وسيكمل النظام الباقي"),
     "settings":      ("⚙️ الإعدادات",             "مفاتيح API وقواعد البيانات المرجعية"),
@@ -4989,6 +4989,7 @@ def render_web_scraping_tab():
     </div>""", unsafe_allow_html=True)
 
     data_path = os.path.join(os.getcwd(), "data", "competitors_latest.csv")
+    competitors_list_path = os.path.join(os.getcwd(), "data", "competitors_list.json")
 
     c1, c2 = st.columns(2)
     with c1:
@@ -5013,6 +5014,14 @@ def render_web_scraping_tab():
             st.success("✅ ملف competitors_latest.csv موجود")
         else:
             st.warning("لا يوجد ملف كشط حتى الآن.")
+    if os.path.exists(competitors_list_path):
+        try:
+            with open(competitors_list_path, "r", encoding="utf-8") as f:
+                _sites = json.load(f)
+            if isinstance(_sites, list):
+                st.caption(f"قائمة المنافسين المفعّلة: {len(_sites)} موقع")
+        except Exception:
+            pass
 
     scraped_df = pd.DataFrame()
     if os.path.exists(data_path):
@@ -5051,11 +5060,18 @@ def render_web_scraping_tab():
     brand_c = auto_guess_col(scraped_df.columns, ["brand", "الماركة", "ماركة"], scraped_df)
 
     mapped_df = pd.DataFrame({
+        "النوع ": "منتج",
+        "نوع المنتج": "منتج جاهز",
         "أسم المنتج": scraped_df[name_c].astype(str).str.strip() if name_c != "— لا يوجد —" else "",
         "سعر المنتج": scraped_df[price_c].astype(str).str.strip() if price_c != "— لا يوجد —" else "",
         "صورة المنتج": scraped_df[img_c].astype(str).str.strip() if img_c != "— لا يوجد —" else "",
         "الماركة": scraped_df[brand_c].astype(str).str.strip() if brand_c != "— لا يوجد —" else "",
     })
+    if "source_site" in scraped_df.columns:
+        mapped_df["الماركة"] = mapped_df["الماركة"].where(
+            mapped_df["الماركة"].astype(str).str.strip() != "",
+            scraped_df["source_site"].astype(str).str.strip(),
+        )
     mapped_df = mapped_df[mapped_df["أسم المنتج"].astype(str).str.strip() != ""].copy().reset_index(drop=True)
 
     try:
@@ -5075,7 +5091,7 @@ def render_web_scraping_tab():
 
     ts = datetime.now().strftime("%Y-%m-%d_%H-%M")
     st.download_button(
-        "📥 تنزيل CSV سلة (منتجات جديدة من الكشط)",
+        "📥 تحميل المنتجات المفقودة (سلة CSV)",
         export_product_csv(salla_ready_df),
         f"scraped_missing_salla_{ts}.csv",
         "text/csv",
