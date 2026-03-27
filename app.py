@@ -3241,15 +3241,6 @@ def _prepare_salla_product_df_for_export(df: pd.DataFrame) -> pd.DataFrame:
 
     df["السعر المخفض"] = df.apply(_fix_sale_price_vs_regular, axis=1)
 
-    def _first_product_image_url(v) -> str:
-        s = str(v or "").strip()
-        if not s or s.lower() in ("nan", "none"):
-            return ""
-        if "," in s:
-            return s.split(",")[0].strip()
-        return s
-
-    df["صورة المنتج"] = df["صورة المنتج"].apply(_first_product_image_url)
     df["الماركة"] = df["الماركة"].apply(_clean_brand_value_for_salla_output)
     if "رمز المنتج sku" in df.columns:
         df["رمز المنتج sku"] = df.apply(
