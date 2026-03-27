@@ -14,6 +14,7 @@ import sys
 import time
 import asyncio
 import unicodedata
+from urllib.parse import unquote, urlparse
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple, Union
@@ -4988,8 +4989,8 @@ def render_web_scraping_tab():
     <b>Web Scraping:</b> شغّل محرك الكشط، راجع الجداول، ثم أرسل البيانات مباشرة إلى المسار الآلي.
     </div>""", unsafe_allow_html=True)
 
-    data_path = os.path.join(os.getcwd(), "data", "competitors_latest.csv")
-    competitors_list_path = os.path.join(os.getcwd(), "data", "competitors_list.json")
+    data_path = os.path.join(DATA_DIR, "competitors_latest.csv")
+    competitors_list_path = os.path.join(DATA_DIR, "competitors_list.json")
 
     c1, c2 = st.columns(2)
     with c1:
@@ -5030,46 +5031,125 @@ def render_web_scraping_tab():
         except Exception:
             scraped_df = pd.read_csv(data_path)
 
-    st.markdown("### البيانات المسحوبة")
+    st.markdown("### البيانات المسحوبة من المنافسين")
     if scraped_df.empty:
         st.info("الملف غير موجود أو فارغ.")
         return
-    st.dataframe(scraped_df.head(200), use_container_width=True, height=330)
+
+    def _to_six_cols_view(df_in: pd.DataFrame) -> pd.DataFrame:
+        d = df_in.copy()
+        d = d.rename(columns={
+            "name": "الاسم",
+            "price": "السعر",
+            "brand": "الماركة",
+            "image_url": "رابط_الصورة",
+            "image": "رابط_الصورة",
+            "url": "رابط_المنتج",
+            "product_url": "رابط_المنتج",
+            "link": "رابط_المنتج",
+            "أسم المنتج": "الاسم",
+            "سعر المنتج": "السعر",
+            "صورة المنتج": "رابط_الصورة",
+            "رمز المنتج sku": "sku",
+        })
+        for c in ("الاسم", "السعر", "الماركة", "رابط_الصورة", "رابط_المنتج", "sku"):
+            if c not in d.columns:
+                d[c] = ""
+        return d[["الاسم", "السعر", "الماركة", "رابط_الصورة", "رابط_المنتج", "sku"]].copy()
+
+    competitor_view_df = _to_six_cols_view(scraped_df)
 
     c_tbl_1, c_tbl_2 = st.columns(2)
     with c_tbl_1:
-        with st.expander("جدول المنافسين (المسحوب)", expanded=True):
-            st.dataframe(scraped_df, use_container_width=True, height=340)
-    with c_tbl_2:
-        with st.expander("جدول متجر مهووس", expanded=True):
+        with st.expander("جدول  ملف متجرنا (مهووس) — ملف سلة كامل", expanded=True):
             store_df_view = st.session_state.get("store_df")
+            if not (isinstance(store_df_view, pd.DataFrame) and not store_df_view.empty):
+                # Fallback: build a minimal store table from mahwous sitemap when store file isn't uploaded yet.
+                try:
+                    sm_url = f"{MAHWOUS_SITE_BASE.rstrip('/')}/sitemap.xml"
+                    idx_r = requests.get(sm_url, timeout=30)
+                    idx_r.raise_for_status()
+                    child_sitemaps = re.findall(r"<loc>\s*([^<]+)\s*</loc>", idx_r.text, flags=re.I)
+                    rows_store = []
+                    for sm in child_sitemaps:
+                        sm_l = str(sm).lower()
+                        if "blog" in sm_l:
+                            continue
+                        try:
+                            sm_r = requests.get(sm, timeout=30)
+                            sm_r.raise_for_status()
+                        except Exception:
+                            continue
+                        for u in re.findall(r"<loc>\s*([^<]+)\s*</loc>", sm_r.text, flags=re.I):
+                            p = urlparse(str(u).strip())
+                            parts = [x for x in (p.path or "").split("/") if x]
+                            if not parts:
+                                continue
+                            tail = unquote(parts[-1]).replace("-", " ").replace("_", " ").strip()
+                            if not tail:
+                                continue
+                            rows_store.append({"أسم المنتج": tail, "رابط_المنتج": str(u).strip()})
+                    if rows_store:
+                        store_df_view = pd.DataFrame(rows_store).drop_duplicates().reset_index(drop=True)
+                        st.session_state.store_df = store_df_view.copy()
+                        st.caption("تم تحميل جدول متجر مهووس تلقائياً من sitemap.")
+                except Exception:
+                    pass
+
             if isinstance(store_df_view, pd.DataFrame) and not store_df_view.empty:
-                st.dataframe(store_df_view, use_container_width=True, height=340)
+                st.dataframe(_to_six_cols_view(store_df_view), use_container_width=True, height=340)
             else:
                 st.warning("يرجى رفع ملف المتجر الأساسي من تبويب المسار الآلي أولاً.")
+    with c_tbl_2:
+        with st.expander("جدول  ملفات المنافسين — يمكن رفع أكثر من ملف", expanded=True):
+            st.dataframe(competitor_view_df, use_container_width=True, height=340)
 
     if st.button("🚀 إرسال المنتجات المسحوبة إلى المسار الآلي", use_container_width=True, key="ws_send_to_pipeline"):
-        mapped_df = scraped_df.rename(columns={
+        # حقن ملف متجرنا (مهووس) كذلك حتى لا يتطلب رفعه يدويًا.
+        store_df_view = st.session_state.get("store_df")
+        if not (isinstance(store_df_view, pd.DataFrame) and not store_df_view.empty):
+            try:
+                sm_url = f"{MAHWOUS_SITE_BASE.rstrip('/')}/sitemap.xml"
+                idx_r = requests.get(sm_url, timeout=30)
+                idx_r.raise_for_status()
+                child_sitemaps = re.findall(r"<loc>\s*([^<]+)\s*</loc>", idx_r.text, flags=re.I)
+                rows_store = []
+                for sm in child_sitemaps:
+                    sm_l = str(sm).lower()
+                    if "blog" in sm_l:
+                        continue
+                    try:
+                        sm_r = requests.get(sm, timeout=30)
+                        sm_r.raise_for_status()
+                    except Exception:
+                        continue
+                    for u in re.findall(r"<loc>\s*([^<]+)\s*</loc>", sm_r.text, flags=re.I):
+                        p = urlparse(str(u).strip())
+                        parts = [x for x in (p.path or "").split("/") if x]
+                        if not parts:
+                            continue
+                        tail = unquote(parts[-1]).replace("-", " ").replace("_", " ").strip()
+                        if not tail:
+                            continue
+                        rows_store.append({"أسم المنتج": tail, "رابط_المنتج": str(u).strip()})
+                if rows_store:
+                    store_df_view = pd.DataFrame(rows_store).drop_duplicates().reset_index(drop=True)
+                    st.session_state.store_df = store_df_view.copy()
+            except Exception:
+                store_df_view = pd.DataFrame()
+
+        if isinstance(store_df_view, pd.DataFrame) and not store_df_view.empty:
+            st.session_state.pipe_store_df = store_df_view.copy()
+            st.session_state.pipe_step = max(st.session_state.pipe_step, 1)
+
+        mapped_df = competitor_view_df.rename(columns={
             "الاسم": "أسم المنتج",
             "السعر": "سعر المنتج",
             "الماركة": "الماركة",
             "رابط_الصورة": "صورة المنتج",
+            "رابط_المنتج": "رابط_المنتج",
             "sku": "رمز المنتج sku",
         }).copy()
-
-        # دعم الملفات ذات الأعمدة الإنجليزية الشائعة أيضاً.
-        mapped_df = mapped_df.rename(columns={
-            "name": "أسم المنتج",
-            "price": "سعر المنتج",
-            "brand": "الماركة",
-            "image_url": "صورة المنتج",
-            "image": "صورة المنتج",
-        })
-        if "source_site" in mapped_df.columns and "الماركة" in mapped_df.columns:
-            mapped_df["الماركة"] = mapped_df["الماركة"].where(
-                mapped_df["الماركة"].astype(str).str.strip() != "",
-                mapped_df["source_site"].astype(str).str.strip(),
-            )
 
         for col in ("أسم المنتج", "سعر المنتج", "صورة المنتج", "الماركة", "رمز المنتج sku"):
             if col not in mapped_df.columns:
