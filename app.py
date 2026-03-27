@@ -3273,11 +3273,15 @@ def _prepare_salla_product_df_for_export(df: pd.DataFrame) -> pd.DataFrame:
             return ""
 
         df["رمز المنتج sku"] = df.apply(_export_sku_row, axis=1)
-    # وزن حسب نوع المنتج في الاسم (#34)
+    # وزن حسب نوع المنتج في الاسم (#34) — طقم/مجموعة دائماً 0.5 كجم حتى لو كان الإثراء احتياطياً
     if "أسم المنتج" in df.columns:
-        df["الوزن"] = df["أسم المنتج"].apply(
-            lambda n: "0.5" if "طقم" in str(n) else "0.2"
-        )
+        def _export_weight_from_name(n) -> str:
+            s = str(n or "")
+            if "طقم" in s or "مجموعة" in s:
+                return "0.5"
+            return "0.2"
+
+        df["الوزن"] = df["أسم المنتج"].apply(_export_weight_from_name)
     df["وحدة الوزن"] = "kg"
     # تصنيف كامل من الاسم المعياري (#40)
     if "أسم المنتج" in df.columns:
@@ -4194,20 +4198,9 @@ def render_compare_tab():
                             rows_out.append(row_ser)
                 if rows_out:
                     final_cmp = pd.DataFrame(rows_out)
-                    for col in SALLA_COLS:
-                        if col not in final_cmp.columns:
-                            final_cmp[col] = ""
-                    final_cmp = final_cmp[[c for c in SALLA_COLS if c in final_cmp.columns]]
-                    # Salla: النظامية (System fields) يجب أن تكون حرفياً لكل صف
-                    if "النوع " in final_cmp.columns:
-                        final_cmp["النوع "] = "منتج"
-                    if "نوع المنتج" in final_cmp.columns:
-                        final_cmp["نوع المنتج"] = "منتج جاهز"
-                    if "الكمية المتوفرة" in final_cmp.columns:
-                        final_cmp["الكمية المتوفرة"] = "0"
-                    if "الماركة" in final_cmp.columns:
-                        final_cmp["الماركة"] = final_cmp["الماركة"].apply(_clean_brand_value_for_salla_output)
-                    st.session_state.cmp_export_df = final_cmp
+                    st.session_state.cmp_export_df = _prepare_salla_product_df_for_export(
+                        final_cmp
+                    )
                     st.success(f"✅ {len(final_cmp)} منتج في القائمة النهائية")
                 else:
                     st.warning("لا توجد صفوف معتمدة.")
