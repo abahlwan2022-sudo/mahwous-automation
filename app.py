@@ -5104,6 +5104,23 @@ def render_web_scraping_tab():
         with st.expander("جدول  ملفات المنافسين — يمكن رفع أكثر من ملف", expanded=True):
             st.dataframe(competitor_view_df, use_container_width=True, height=340)
 
+    st.markdown("### خيارات الإرسال للمسار الآلي")
+    send_all_competitors = st.checkbox("إرسال جميع المنافسين (قد يكون بطيئاً)", value=False)
+    default_limit = 2000
+    try:
+        default_limit = min(default_limit, len(competitor_view_df))
+    except Exception:
+        pass
+    send_competitors_limit = st.number_input(
+        "حد أقصى لصفوف المنافسين المراد إرسالها:",
+        min_value=50,
+        value=int(default_limit) if default_limit else 2000,
+        step=50,
+    )
+    st.caption(
+        f"سيتم إرسال: {len(competitor_view_df) if send_all_competitors else min(len(competitor_view_df), int(send_competitors_limit)):,} صف منافس."
+    )
+
     if st.button("🚀 إرسال المنتجات المسحوبة إلى المسار الآلي", use_container_width=True, key="ws_send_to_pipeline"):
         # حقن ملف متجرنا (مهووس) كذلك حتى لا يتطلب رفعه يدويًا.
         store_df_view = st.session_state.get("store_df")
@@ -5142,7 +5159,13 @@ def render_web_scraping_tab():
             st.session_state.pipe_store_df = store_df_view.copy()
             st.session_state.pipe_step = max(st.session_state.pipe_step, 1)
 
-        mapped_df = competitor_view_df.rename(columns={
+        view_to_send = (
+            competitor_view_df
+            if send_all_competitors
+            else competitor_view_df.head(int(send_competitors_limit))
+        )
+
+        mapped_df = view_to_send.rename(columns={
             "الاسم": "أسم المنتج",
             "السعر": "سعر المنتج",
             "الماركة": "الماركة",
