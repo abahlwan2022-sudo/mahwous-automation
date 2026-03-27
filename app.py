@@ -249,14 +249,12 @@ div.stButton > button:hover { opacity: 0.88 !important; }
 # ╚══════════════════════════════════════════════════════════════════╝
 # ترتيب أعمدة «بيانات المنتج» كما في تصدير سلة (تحديث/تعديل منتجات)
 SALLA_COLS = [
-    "No.",
     "النوع ", "أسم المنتج", "تصنيف المنتج", "صورة المنتج",
-    "وصف صورة المنتج", "نوع المنتج", "سعر المنتج", "الكمية المتوفرة", "الوصف",
+    "وصف صورة المنتج", "نوع المنتج", "سعر المنتج", "الوصف",
     "هل يتطلب شحن؟", "رمز المنتج sku", "سعر التكلفة", "السعر المخفض",
     "تاريخ بداية التخفيض", "تاريخ نهاية التخفيض",
     "اقصي كمية لكل عميل", "إخفاء خيار تحديد الكمية",
     "اضافة صورة عند الطلب", "الوزن", "وحدة الوزن",
-    "حالة المنتج",
     "الماركة", "العنوان الترويجي", "تثبيت المنتج",
     "الباركود", "السعرات الحرارية", "MPN", "GTIN",
     "خاضع للضريبة ؟", "سبب عدم الخضوع للضريبة",
@@ -3227,11 +3225,7 @@ def _prepare_salla_product_df_for_export(df: pd.DataFrame) -> pd.DataFrame:
     df = df.reindex(columns=list(SALLA_COLS))
     df["النوع "] = "منتج"
     df["نوع المنتج"] = "منتج جاهز"
-    df["حالة المنتج"] = "مرئي"
     df["خاضع للضريبة ؟"] = "نعم"
-    df["الكمية المتوفرة"] = df["الكمية المتوفرة"].apply(
-        lambda x: "0" if not str(x or "").strip() or str(x).lower() in ("nan", "none") else str(x)
-    )
     df["سعر المنتج"] = df["سعر المنتج"].apply(sanitize_salla_price_for_export)
     df["السعر المخفض"] = df["السعر المخفض"].apply(sanitize_salla_price_for_export)
 
@@ -3257,22 +3251,13 @@ def _prepare_salla_product_df_for_export(df: pd.DataFrame) -> pd.DataFrame:
 
     df["صورة المنتج"] = df["صورة المنتج"].apply(_first_product_image_url)
     df["الماركة"] = df["الماركة"].apply(_clean_brand_value_for_salla_output)
-    # SKU: بادئة V- لتقليل التصادم مع رموز المتجر (#33)
     if "رمز المنتج sku" in df.columns:
-
-        def _export_sku_row(row) -> str:
-            s = str(row.get("رمز المنتج sku", "") or "").strip()
-            if s and s.lower() not in ("nan", "none"):
-                if re.match(r"^v-", s, re.IGNORECASE):
-                    rest = s[2:].strip()
-                    return f"V-{rest}" if rest else ""
-                return f"V-{s}"
-            no = str(row.get("No.", "") or "").strip()
-            if no and no.lower() not in ("nan", "none"):
-                return f"V-{no}"
-            return ""
-
-        df["رمز المنتج sku"] = df.apply(_export_sku_row, axis=1)
+        df["رمز المنتج sku"] = df.apply(
+            lambda row: f"V-{row.name + 1}"
+            if not str(row.get("رمز المنتج sku", "") or "").strip()
+            else str(row["رمز المنتج sku"]),
+            axis=1,
+        )
     # وزن حسب نوع المنتج في الاسم (#34) — طقم/مجموعة دائماً 0.5 كجم حتى لو كان الإثراء احتياطياً
     if "أسم المنتج" in df.columns:
         def _export_weight_from_name(n) -> str:
@@ -5392,16 +5377,7 @@ if st.session_state.page == "pipeline":
                         desc = ""
 
                     row_br_raw = clean_brand_name(str(prow.get("الماركة", "") or ""))
-                    _nk_fb = (
-                        normalize_brand_name_v2(row_br_raw)
-                        if str(row_br_raw).strip()
-                        else ""
-                    )
-                    prow_brand_fb = (
-                        str(row_br_raw).strip()
-                        if (_nk_fb and _nk_fb in known_brand_names)
-                        else "غير محدد"
-                    )
+                    prow_brand_fb = str(row_br_raw).strip() if str(row_br_raw).strip() else "غير محدد"
                     clean_pname = _clean_pname_for_fallback(pname)
                     if (not ai_out) or (not str(desc or "").strip()):
                         desc = _generate_fallback_html(clean_pname, prow_brand_fb)
