@@ -5509,7 +5509,7 @@ if st.session_state.page == "pipeline":
 
                 prog_bar.progress(55 + int(min(pi_idx, total_ap) / max(total_ap, 1) * 34))
                 if _pipe_ai_k and HAS_ANTHROPIC:
-                    time.sleep(6)
+                    time.sleep(5)
 
             if fallback_count > 0:
                 st.warning(
