@@ -6290,6 +6290,45 @@ elif st.session_state.page == "settings":
                 "new_brands_salla.csv", "text/csv",
                 width='stretch', key="exp_nb_set_c")
 
+    import os
+    import pandas as pd
+    import asyncio
+    from utils.async_scraper import run_scraper_engine
+
+    st.markdown("---")
+    st.subheader("🤖 تشغيل محرك الكشط وعرض النتائج")
+    st.info("سيسحب هذا المحرك أحدث أسعار المنافسين بناءً على الروابط المدخلة ويعرضها فوراً.")
+
+    # 1. The Scraper Button
+    if st.button("🚀 بدء جلب بيانات المنافسين الآن", use_container_width=True):
+        with st.spinner("جاري اختراق الموقع وسحب البيانات... يرجى الانتظار."):
+            try:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                loop.run_until_complete(run_scraper_engine())
+                st.success("✅ تمت عملية الكشط بنجاح!")
+                # CRITICAL: Force Streamlit to refresh and read the newly created file
+                st.rerun()
+            except Exception as e:
+                st.error(f"❌ حدث خطأ أثناء الكشط: {str(e)}")
+
+    # 2. Persistent Data Viewer (Always visible if the file exists)
+    st.markdown("### 📊 البيانات المسحوبة من المنافسين")
+    data_path = os.path.join(os.getcwd(), "data", "competitors_latest.csv")
+
+    if os.path.exists(data_path):
+        try:
+            df_comp = pd.read_csv(data_path)
+            if df_comp.empty:
+                st.warning("⚠️ تمت عملية الكشط، ولكن الملف فارغ! تأكد أن رابط الـ Sitemap صحيح ويحتوي على منتجات.")
+            else:
+                st.success(f"✅ تم العثور على {len(df_comp)} منتج مسحوب وجاهز للمطابقة.")
+                st.dataframe(df_comp, use_container_width=True, height=400)
+        except Exception as e:
+            st.error(f"❌ حدث خطأ في قراءة ملف البيانات: {str(e)}")
+    else:
+        st.warning("⚠️ لا توجد أي بيانات مسحوبة حالياً. اضغط على زر الجلب أعلاه للبدء.")
+
     st.markdown("""<hr class="gdiv"><div class="sec-title"><div class="bar"></div>
     <h3>معلومات النظام</h3></div>""", unsafe_allow_html=True)
     st.markdown(f"""
