@@ -5,10 +5,11 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import re
 import xml.etree.ElementTree as ET
-from urllib.parse import unquote, urlparse
+from urllib.parse import unquote, urlparse, urljoin
 
 import pandas as pd
 import requests
@@ -27,6 +28,57 @@ def _data_csv_path() -> str:
     data_dir = os.path.join(os.getcwd(), "data")
     os.makedirs(data_dir, exist_ok=True)
     return os.path.join(data_dir, "competitors_latest.csv")
+
+
+def _competitors_list_path() -> str:
+    data_dir = os.path.join(os.getcwd(), "data")
+    os.makedirs(data_dir, exist_ok=True)
+    return os.path.join(data_dir, "competitors_list.json")
+
+
+def _domain_from_url(u: str) -> str:
+    try:
+        host = urlparse(str(u or "").strip()).netloc.lower()
+        return host.replace("www.", "").strip()
+    except Exception:
+        return ""
+
+
+def _normalize_site_to_sitemap(url_or_domain: str) -> str:
+    raw = str(url_or_domain or "").strip()
+    if not raw:
+        return ""
+    if not raw.startswith(("http://", "https://")):
+        raw = f"https://{raw}"
+    p = urlparse(raw)
+    base = f"{p.scheme}://{p.netloc}"
+    if p.path and p.path.lower().endswith(".xml"):
+        return raw
+    return urljoin(base + "/", "sitemap.xml")
+
+
+def _load_competitors_targets() -> list[str]:
+    out: list[str] = []
+    p = _competitors_list_path()
+    if os.path.exists(p):
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, list):
+                for item in data:
+                    if isinstance(item, str):
+                        out.append(item.strip())
+                    elif isinstance(item, dict):
+                        v = str(item.get("url", "") or item.get("site", "") or item.get("domain", "")).strip()
+                        if v:
+                            out.append(v)
+        except Exception:
+            pass
+    if not out:
+        sm_url = os.environ.get("COMPETITOR_SITEMAP_URL", "").strip() or DEFAULT_COMPETITOR_SITEMAP_URL
+        if sm_url:
+            out = [sm_url]
+    return [x for x in out if x]
 
 
 def _rows_from_sitemap_xml(text: str) -> list[dict]:
@@ -107,13 +159,34 @@ def _sync_fetch_sitemap(url: str) -> list[dict]:
 async def run_scraper_engine() -> None:
     """تشغيل الكشط وكتابة competitors_latest.csv."""
     out = _data_csv_path()
-    sm_url = os.environ.get("COMPETITOR_SITEMAP_URL", "").strip() or DEFAULT_COMPETITOR_SITEMAP_URL
-    rows: list[dict] = []
-    if sm_url:
-        rows = await asyncio.to_thread(_sync_fetch_sitemap, sm_url)
-    if not rows:
-        pd.DataFrame(columns=["name", "url", "price"]).to_csv(
+    targets = _load_competitors_targets()
+    all_rows: list[dict] = []
+    for target in targets:
+        sm_url = _normalize_site_to_sitemap(target)
+        if not sm_url:
+            continue
+        try:
+            rows = await asyncio.to_thread(_sync_fetch_sitemap, sm_url)
+        except Exception:
+            rows = []
+        source_domain = _domain_from_url(target) or _domain_from_url(sm_url)
+        for r in rows:
+            rr = dict(r)
+            rr.setdefault("source_site", source_domain)
+            all_rows.append(rr)
+
+    if not all_rows:
+        pd.DataFrame(columns=["name", "url", "price", "source_site"]).to_csv(
             out, index=False, encoding="utf-8-sig"
         )
         return
-    pd.DataFrame(rows).to_csv(out, index=False, encoding="utf-8-sig")
+
+    df = pd.DataFrame(all_rows)
+    if "name" in df.columns:
+        df["name"] = df["name"].astype(str).str.strip()
+        df = df[df["name"] != ""].copy()
+    if "url" in df.columns:
+        df["url"] = df["url"].astype(str).str.strip()
+        df = df[df["url"] != ""].copy()
+    df = df.drop_duplicates(subset=[c for c in ["name", "url", "source_site"] if c in df.columns], keep="first")
+    df.to_csv(out, index=False, encoding="utf-8-sig")
