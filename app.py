@@ -579,6 +579,7 @@ def _init_state():
         "audit_results":  None,   # نتائج التدقيق
         # Auto Pipeline state
         "pipe_store_df":   None,
+        "store_df":        None,
         "pipe_comp_dfs":   [],
         "pipe_results":    None,
         "pipe_approved":   None,
@@ -4984,8 +4985,7 @@ def render_store_audit_tab():
 # ╚══════════════════════════════════════════════════════════════════╝
 def render_web_scraping_tab():
     st.markdown("""<div class="al-info">
-    <b>Web Scraping:</b> شغّل محرك الكشط، ثم قارن النتائج مع ملف متجرك للاحتفاظ بالمنتجات الجديدة فقط،
-    ثم صدّر CSV جاهز لسلة عبر نفس طبقة التنسيق الحالية.
+    <b>Web Scraping:</b> شغّل محرك الكشط، راجع الجداول، ثم أرسل البيانات مباشرة إلى المسار الآلي.
     </div>""", unsafe_allow_html=True)
 
     data_path = os.path.join(os.getcwd(), "data", "competitors_latest.csv")
@@ -5036,68 +5036,51 @@ def render_web_scraping_tab():
         return
     st.dataframe(scraped_df.head(200), use_container_width=True, height=330)
 
-    st.markdown("### ملف المتجر للمقارنة")
-    store_file = st.file_uploader(
-        "ارفع ملف المتجر (CSV/Excel) لاستخراج المنتجات الجديدة فقط",
-        type=["csv", "xlsx", "xls", "xlsm"],
-        key="ws_store_uploader",
-    )
-    if store_file is not None:
-        store_df = read_uploaded_any(store_file)
-    elif st.session_state.get("pipe_store_df") is not None and not st.session_state.pipe_store_df.empty:
-        store_df = st.session_state.pipe_store_df.copy()
-        st.caption("تم استخدام ملف المتجر من جلسة المسار الآلي.")
-    else:
-        store_df = pd.DataFrame()
+    c_tbl_1, c_tbl_2 = st.columns(2)
+    with c_tbl_1:
+        with st.expander("جدول المنافسين (المسحوب)", expanded=True):
+            st.dataframe(scraped_df, use_container_width=True, height=340)
+    with c_tbl_2:
+        with st.expander("جدول متجر مهووس", expanded=True):
+            store_df_view = st.session_state.get("store_df")
+            if isinstance(store_df_view, pd.DataFrame) and not store_df_view.empty:
+                st.dataframe(store_df_view, use_container_width=True, height=340)
+            else:
+                st.warning("يرجى رفع ملف المتجر الأساسي من تبويب المسار الآلي أولاً.")
 
-    if store_df.empty:
-        st.warning("ارفع ملف المتجر أو جهّزه من المسار الآلي لإتمام استخراج المنتجات الناقصة.")
-        return
+    if st.button("🚀 إرسال المنتجات المسحوبة إلى المسار الآلي", use_container_width=True, key="ws_send_to_pipeline"):
+        mapped_df = scraped_df.rename(columns={
+            "الاسم": "أسم المنتج",
+            "السعر": "سعر المنتج",
+            "الماركة": "الماركة",
+            "رابط_الصورة": "صورة المنتج",
+            "sku": "رمز المنتج sku",
+        }).copy()
 
-    name_c = auto_guess_col(scraped_df.columns, ["name", "اسم", "title", "product", "أسم المنتج"], scraped_df)
-    price_c = auto_guess_col(scraped_df.columns, ["price", "السعر", "سعر"], scraped_df)
-    img_c = auto_guess_col(scraped_df.columns, ["image_url", "image", "img", "photo", "صورة"], scraped_df)
-    brand_c = auto_guess_col(scraped_df.columns, ["brand", "الماركة", "ماركة"], scraped_df)
+        # دعم الملفات ذات الأعمدة الإنجليزية الشائعة أيضاً.
+        mapped_df = mapped_df.rename(columns={
+            "name": "أسم المنتج",
+            "price": "سعر المنتج",
+            "brand": "الماركة",
+            "image_url": "صورة المنتج",
+            "image": "صورة المنتج",
+        })
+        if "source_site" in mapped_df.columns and "الماركة" in mapped_df.columns:
+            mapped_df["الماركة"] = mapped_df["الماركة"].where(
+                mapped_df["الماركة"].astype(str).str.strip() != "",
+                mapped_df["source_site"].astype(str).str.strip(),
+            )
 
-    mapped_df = pd.DataFrame({
-        "النوع ": "منتج",
-        "نوع المنتج": "منتج جاهز",
-        "أسم المنتج": scraped_df[name_c].astype(str).str.strip() if name_c != "— لا يوجد —" else "",
-        "سعر المنتج": scraped_df[price_c].astype(str).str.strip() if price_c != "— لا يوجد —" else "",
-        "صورة المنتج": scraped_df[img_c].astype(str).str.strip() if img_c != "— لا يوجد —" else "",
-        "الماركة": scraped_df[brand_c].astype(str).str.strip() if brand_c != "— لا يوجد —" else "",
-    })
-    if "source_site" in scraped_df.columns:
-        mapped_df["الماركة"] = mapped_df["الماركة"].where(
-            mapped_df["الماركة"].astype(str).str.strip() != "",
-            scraped_df["source_site"].astype(str).str.strip(),
-        )
-    mapped_df = mapped_df[mapped_df["أسم المنتج"].astype(str).str.strip() != ""].copy().reset_index(drop=True)
+        for col in ("أسم المنتج", "سعر المنتج", "صورة المنتج", "الماركة", "رمز المنتج sku"):
+            if col not in mapped_df.columns:
+                mapped_df[col] = ""
+        mapped_df = mapped_df[mapped_df["أسم المنتج"].astype(str).str.strip() != ""].copy().reset_index(drop=True)
 
-    try:
-        missing_df = filter_new_products_against_store(
-            mapped_df,
-            store_df,
-            similarity_threshold=90,
-            use_sku_exact=False,
-        )
-    except Exception as e:
-        st.warning(f"تعذر تطبيق فلتر المقارنة الذكي، سيتم المتابعة بكل الصفوف المسحوبة: {e}")
-        missing_df = mapped_df
-
-    salla_ready_df = _prepare_salla_product_df_for_export(missing_df)
-    st.success(f"✅ المنتجات الجديدة بعد المقارنة: {len(salla_ready_df):,}")
-    st.dataframe(salla_ready_df.head(200), use_container_width=True, height=340)
-
-    ts = datetime.now().strftime("%Y-%m-%d_%H-%M")
-    st.download_button(
-        "📥 تحميل المنتجات المفقودة (سلة CSV)",
-        export_product_csv(salla_ready_df),
-        f"scraped_missing_salla_{ts}.csv",
-        "text/csv",
-        use_container_width=True,
-        key="ws_dl_salla_csv",
-    )
+        st.session_state.comp_df = mapped_df
+        # ربط اختياري مع الحالة الحالية للمسار الآلي بدون تعديل منطقه الداخلي.
+        st.session_state.pipe_comp_dfs = [mapped_df.copy()]
+        st.session_state.page = "pipeline"
+        st.success("تم ضخ البيانات بنجاح! اذهب إلى تبويب 'المسار الآلي' واضغط على 'مقارنة' لبدء العمل.")
 
 
 # ╔══════════════════════════════════════════════════════════════════╗
@@ -5157,6 +5140,7 @@ if st.session_state.page == "pipeline":
                     APP_LOG.warning("store upload validation: %s", err_v)
                 else:
                     st.session_state.pipe_store_df = df_ps
+                    st.session_state.store_df = df_ps.copy()
                     st.session_state.pipe_step = max(st.session_state.pipe_step, 1)
                     st.success(f"✅ {len(df_ps):,} منتج في المتجر")
 
