@@ -3273,6 +3273,11 @@ def _prepare_salla_product_df_for_export(df: pd.DataFrame) -> pd.DataFrame:
         df["تصنيف المنتج"] = df["أسم المنتج"].apply(
             lambda n: match_category(str(n), "")
         )
+    # توافق متجر سلة الحالي: استبدال التصنيف غير الموجود "العطور > عطور للجنسين" بالتصنيف العام "العطور"
+    if "تصنيف المنتج" in df.columns:
+        df["تصنيف المنتج"] = df["تصنيف المنتج"].astype(str).apply(
+            lambda v: "العطور" if "العطور > عطور للجنسين" in v else v
+        )
 
     def _export_cost_row(row) -> str:
         raw = row.get("سعر التكلفة", "")
@@ -3314,6 +3319,21 @@ def _prepare_salla_product_df_for_export(df: pd.DataFrame) -> pd.DataFrame:
 
     df["تاريخ بداية التخفيض"] = df["تاريخ بداية التخفيض"].apply(_disc_date)
     df["تاريخ نهاية التخفيض"] = df["تاريخ نهاية التخفيض"].apply(_disc_date)
+    # سلة ترفض محارف خاصة في alt الصورة (مثل + - % ...)؛ نسمح فقط عربي/إنجليزي/أرقام/مسافات
+    if "وصف صورة المنتج" in df.columns:
+        df["وصف صورة المنتج"] = (
+            df["وصف صورة المنتج"]
+            .astype(str)
+            .str.replace(r"[^\w\s\u0600-\u06FF]", "", regex=True)
+            .str.strip()
+        )
+    # سلة تتوقع هذه الحقول فارغة وليست "0" في قالب الاستيراد الجديد
+    if "اقصي كمية لكل عميل" in df.columns:
+        df["اقصي كمية لكل عميل"] = ""
+    if "إخفاء خيار تحديد الكمية" in df.columns:
+        df["إخفاء خيار تحديد الكمية"] = ""
+    if "اضافة صورة عند الطلب" in df.columns:
+        df["اضافة صورة عند الطلب"] = ""
     return df
 
 
